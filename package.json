@@ -11,7 +11,7 @@
     "prebuild:android": "expo prebuild --platform android",
     "apk:local": "cd android && gradlew assembleRelease",
     "apk:debug": "cd android && gradlew assembleDebug",
-    "apk:eas": "npx eas-cli build --platform android --profile apk",
+    "apk:eas": "set EAS_SKIP_AUTO_FINGERPRINT=1&& npx eas-cli build --platform android --profile apk",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit"
