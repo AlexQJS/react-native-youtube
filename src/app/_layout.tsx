@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -15,6 +15,7 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { PersistentPlayerHost } from '../components/PersistentPlayerHost';
+import { SplashScreen } from '../components/SplashScreen';
 import { config } from '../config/config';
 import { PlayerProvider, usePlayer } from '../context/PlayerContext';
 import { useThemeColors } from '../hooks/useThemeColors';
@@ -233,10 +234,17 @@ function AppShell() {
 }
 
 export default function RootLayout() {
+  const [isSplashVisible, setIsSplashVisible] = useState(true);
+
   return (
     <SafeAreaProvider>
       <PlayerProvider>
-        <AppShell />
+        <View style={styles.outerRoot}>
+          <AppShell />
+          {isSplashVisible && (
+            <SplashScreen onFinish={() => setIsSplashVisible(false)} />
+          )}
+        </View>
       </PlayerProvider>
     </SafeAreaProvider>
   );

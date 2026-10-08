@@ -54,8 +54,19 @@ export type ThemeColors = typeof darkColors;
 
 export const config = {
   app: {
-    name: 'YouTube Feed',
+    name: 'Video Feed',
     version: '1.0.0',
+  },
+
+  splash: {
+    brandName: 'Jelly Feed',
+    tagline: 'Tus canales favoritos de YouTube',
+    backgroundColor: '#32c5fa',
+    accentColor: '#FFFFFF',
+    textColor: '#FFFFFF',
+    logoSize: 136,
+    durationMs: 1300,
+    fadeOutDurationMs: 350,
   },
 
   theme: {
@@ -142,6 +153,19 @@ export const config = {
     completionRatioThreshold: 0.95,
     /** Margen en segundos antes del final para considerar el vídeo terminado */
     completionRemainingSeconds: 10,
+    /** Opciones de tiempo para la funcionalidad Sleep Mode dentro del reproductor */
+    sleepTimerOptions: [
+      { id: '5m', label: '5 min', durationSeconds: 5 * 60 },
+      { id: '15m', label: '15 min', durationSeconds: 15 * 60 },
+      { id: '30m', label: '30 min', durationSeconds: 30 * 60 },
+      { id: '1h', label: '1 h', durationSeconds: 60 * 60 },
+      { id: '2h', label: '2 h', durationSeconds: 2 * 60 * 60 },
+      {
+        id: 'end_of_video',
+        label: 'Hasta que termine el vídeo',
+        durationSeconds: null,
+      },
+    ] as const,
   },
 
   feed: {

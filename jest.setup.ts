@@ -17,3 +17,10 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
     }),
   },
 }));
+
+jest.mock('expo-keep-awake', () => ({
+  activateKeepAwakeAsync: jest.fn(async () => {}),
+  deactivateKeepAwake: jest.fn(async () => {}),
+  useKeepAwake: jest.fn(),
+}));
+
