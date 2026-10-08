@@ -59,7 +59,7 @@ export const config = {
   },
 
   splash: {
-    brandName: 'Jelly Feed',
+    brandName: 'Video Feed',
     tagline: 'Tus canales favoritos de YouTube',
     backgroundColor: '#32c5fa',
     accentColor: '#FFFFFF',

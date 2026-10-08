@@ -1,4 +1,4 @@
-# Jelly Feed — React Native + Expo
+# Video Feed — React Native + Expo
 
 Aplicación móvil multiplataforma (**iOS y Android**) desarrollada con **React Native, Expo, TypeScript y Expo Router** para descubrir y reproducir vídeos de tus canales favoritos de YouTube, gestionar suscripciones locales y mantener el progreso de reproducción de cada vídeo entre sesiones.
 
