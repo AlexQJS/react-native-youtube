@@ -223,8 +223,59 @@ describe('Sleep Mode en VideoPlayer', () => {
     expect(getByTestId('sleep-mode-locked-overlay')).toBeTruthy();
   });
 
+  it('no descuenta segundos mientras el vídeo está en pausa o cargando y solicita permiso de bloqueo si no está activo', async () => {
+    jest.spyOn(deviceLock, 'isDeviceAdminActive').mockResolvedValue(false);
+    const requestAdminSpy = jest
+      .spyOn(deviceLock, 'requestDeviceAdmin')
+      .mockResolvedValue(true);
+
+    const { getByTestId } = render(
+      <VideoPlayer
+        videoId="test_vid_sync"
+        title="Vídeo sincronizado"
+        onProgressUpdate={mockOnProgressUpdate}
+        onFlushProgress={mockOnFlushProgress}
+        onRestartProgress={mockOnRestartProgress}
+      />
+    );
+
+    fireEvent.press(getByTestId('player-sleep-mode-button'));
+    fireEvent.press(getByTestId('sleep-option-5m'));
+
+    // Mientras el vídeo aún no ha empezado a reproducirse (5 segundos de carga), el contador sigue en 5:00
+    act(() => {
+      jest.advanceTimersByTime(5000);
+    });
+    expect(getByTestId('player-sleep-mode-button-text').props.children).toBe('5:00');
+
+    // Al empezar la reproducción (state = 1), empieza a descontar exactamente desde 5:00
+    const webview = getByTestId('mock-webview');
+    act(() => {
+      webview.props.onMessage({
+        nativeEvent: {
+          data: JSON.stringify({
+            type: 'STATE_CHANGE',
+            state: 1,
+            position: 0,
+            duration: 600,
+          }),
+        },
+      });
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(5000);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(getByTestId('player-sleep-mode-button-text').props.children).toBe('4:55');
+    expect(requestAdminSpy).toHaveBeenCalled();
+  });
+
   it('configura correctamente todas las duraciones en config.playback.sleepTimerOptions', () => {
     expect(config.playback.sleepTimerOptions).toEqual([
+      { id: '1m', label: '1 min', durationSeconds: 60 },
       { id: '5m', label: '5 min', durationSeconds: 300 },
       { id: '15m', label: '15 min', durationSeconds: 900 },
       { id: '30m', label: '30 min', durationSeconds: 1800 },

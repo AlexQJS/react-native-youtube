@@ -10,6 +10,7 @@ export type SleepTimerOptionId = SleepTimerOption['id'];
 
 export interface UseSleepTimerParams {
   onExpire: () => void;
+  isPlaying?: boolean;
 }
 
 export interface UseSleepTimerResult {
@@ -27,7 +28,10 @@ export interface UseSleepTimerResult {
   requestLockPermission: () => Promise<boolean>;
 }
 
-export function useSleepTimer({ onExpire }: UseSleepTimerParams): UseSleepTimerResult {
+export function useSleepTimer({
+  onExpire,
+  isPlaying = true,
+}: UseSleepTimerParams): UseSleepTimerResult {
   const options = config.playback.sleepTimerOptions;
 
   const [activeOptionId, setActiveOptionId] = useState<SleepTimerOptionId | null>(null);
@@ -44,17 +48,21 @@ export function useSleepTimer({ onExpire }: UseSleepTimerParams): UseSleepTimerR
   );
 
   const triggerSleep = useCallback(() => {
+    // Primero pausamos el reproductor mientras el WebView sigue montado
+    onExpireRef.current();
+    // Liberamos cualquier keep-awake activo (tanto el tag del reproductor como el tag por defecto de Expo)
+    deactivateKeepAwake(VIDEO_PLAYER_KEEP_AWAKE_TAG).catch(() => {});
+    deactivateKeepAwake().catch(() => {});
+    // Actualizamos estado y bloqueamos la pantalla del dispositivo
     setActiveOptionId(null);
     setRemainingSeconds(null);
     setIsSleepTriggered(true);
-    deactivateKeepAwake(VIDEO_PLAYER_KEEP_AWAKE_TAG).catch(() => {});
-    onExpireRef.current();
     deviceLock.lockDeviceScreen().catch(() => {});
   }, []);
 
-  // Cuenta atrás cada segundo para las opciones con tiempo definido (5m, 15m, 30m, 1h, 2h)
+  // Cuenta atrás cada segundo únicamente mientras el vídeo está reproduciéndose (isPlaying === true)
   useEffect(() => {
-    if (!activeOptionId || activeOptionId === 'end_of_video') {
+    if (!activeOptionId || activeOptionId === 'end_of_video' || !isPlaying) {
       return;
     }
 
@@ -73,9 +81,9 @@ export function useSleepTimer({ onExpire }: UseSleepTimerParams): UseSleepTimerR
     return () => {
       clearInterval(timer);
     };
-  }, [activeOptionId]);
+  }, [activeOptionId, isPlaying]);
 
-  // Ejecutar la pausa y bloqueo cuando el contador llega a 0
+  // Ejecutar la pausa y bloqueo cuando el contador llega exactamente a 0
   useEffect(() => {
     if (
       activeOptionId &&
@@ -102,6 +110,17 @@ export function useSleepTimer({ onExpire }: UseSleepTimerParams): UseSleepTimerR
       } else {
         setRemainingSeconds(null);
       }
+
+      // Solicitar permiso de administrador de dispositivo en Android si aún no está concedido
+      // para que DevicePolicyManager.lockNow() pueda bloquear la pantalla al terminar el tiempo
+      deviceLock
+        .isDeviceAdminActive()
+        .then((granted) => {
+          if (!granted) {
+            deviceLock.requestDeviceAdmin().catch(() => {});
+          }
+        })
+        .catch(() => {});
     },
     [options]
   );

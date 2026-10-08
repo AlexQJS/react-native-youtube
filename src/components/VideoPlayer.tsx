@@ -228,10 +228,17 @@ export function VideoPlayer({
   const [reloadKey, setReloadKey] = useState<number>(0);
   const [isSleepMenuOpen, setIsSleepMenuOpen] = useState<boolean>(false);
 
+  const startSecondsRef = useRef<number>(initialPosition);
+  if (reloadKey === 0 && !isReady && initialPosition > 0 && startSecondsRef.current === 0) {
+    startSecondsRef.current = initialPosition;
+  }
+
   const handleSleepExpire = useCallback(() => {
     setIsPlaying(false);
     setIsSleepMenuOpen(false);
+    startSecondsRef.current = currentPosition;
     deactivateKeepAwake(VIDEO_PLAYER_KEEP_AWAKE_TAG).catch(() => {});
+    deactivateKeepAwake().catch(() => {});
     if (webViewRef.current) {
       webViewRef.current.injectJavaScript(
         'if (typeof releaseWakeLock === "function") { releaseWakeLock(); } if (typeof stopTracking === "function") { stopTracking(); } if (player && player.pauseVideo) { player.pauseVideo(); } document.querySelectorAll("video").forEach(function(v){ try { v.pause(); } catch(e){} }); true;'
@@ -253,6 +260,7 @@ export function VideoPlayer({
     dismissSleepTriggered,
   } = useSleepTimer({
     onExpire: handleSleepExpire,
+    isPlaying,
   });
 
   // Evitar que el móvil se bloquee mientras el vídeo se esté reproduciendo,
@@ -268,11 +276,6 @@ export function VideoPlayer({
       deactivateKeepAwake(VIDEO_PLAYER_KEEP_AWAKE_TAG).catch(() => {});
     };
   }, [isPlaying, isSleepTriggered]);
-
-  const startSecondsRef = useRef<number>(initialPosition);
-  if (reloadKey === 0 && !isReady && initialPosition > 0 && startSecondsRef.current === 0) {
-    startSecondsRef.current = initialPosition;
-  }
 
   const htmlSource = useMemo(
     () => buildYouTubeIframeHtml(videoId, startSecondsRef.current),
@@ -306,7 +309,8 @@ export function VideoPlayer({
           case 'STATE_CHANGE': {
             const pos = msg.position ?? currentPosition;
             const dur = msg.duration && msg.duration > 0 ? msg.duration : duration;
-            setCurrentPosition(pos);
+            const effectivePos = msg.state === 0 && dur > 0 ? dur : pos;
+            setCurrentPosition(effectivePos);
             if (dur > 0) {
               setDuration(dur);
             }
@@ -316,13 +320,13 @@ export function VideoPlayer({
                 dismissSleepTriggered();
               }
               setIsPlaying(true);
-              onProgressUpdate(pos, dur);
+              onProgressUpdate(effectivePos, dur);
             } else if (msg.state === 2) {
               setIsPlaying(false);
-              onFlushProgress(pos, dur);
+              onFlushProgress(effectivePos, dur);
             } else if (msg.state === 0) {
               setIsPlaying(false);
-              onFlushProgress(dur > 0 ? dur : pos, dur);
+              onFlushProgress(effectivePos, dur);
               notifyVideoEnded();
             }
             break;
@@ -350,30 +354,35 @@ export function VideoPlayer({
 
   const togglePlayPause = useCallback(() => {
     if (isSleepTriggered) {
+      startSecondsRef.current = currentPosition;
+      setIsReady(false);
       dismissSleepTriggered();
+      return;
     }
     if (!webViewRef.current) return;
     const command = isPlaying
       ? 'if (player && player.pauseVideo) { player.pauseVideo(); } true;'
       : 'if (player && player.playVideo) { player.playVideo(); } true;';
     webViewRef.current.injectJavaScript(command);
-  }, [dismissSleepTriggered, isPlaying, isSleepTriggered]);
+  }, [currentPosition, dismissSleepTriggered, isPlaying, isSleepTriggered]);
 
   const handleResumeAfterSleep = useCallback(() => {
+    startSecondsRef.current = currentPosition;
+    setIsReady(false);
     dismissSleepTriggered();
-    if (webViewRef.current) {
-      webViewRef.current.injectJavaScript(
-        'if (player && player.playVideo) { player.playVideo(); } true;'
-      );
-    }
-  }, [dismissSleepTriggered]);
+  }, [currentPosition, dismissSleepTriggered]);
 
   const handleSelectSleepOption = useCallback(
     (optionId: SleepTimerOptionId) => {
       selectSleepOption(optionId);
       setIsSleepMenuOpen(false);
+      if (!isPlaying && webViewRef.current) {
+        webViewRef.current.injectJavaScript(
+          'if (player && player.playVideo) { player.playVideo(); } true;'
+        );
+      }
     },
-    [selectSleepOption]
+    [isPlaying, selectSleepOption]
   );
 
   const handleCancelSleep = useCallback(() => {
@@ -425,153 +434,6 @@ export function VideoPlayer({
       testID={minimized ? 'mini-player-container' : 'video-player-container'}
       style={styles.wrapper}
     >
-      {/* Barra compacta superior cuando está en modo Mini Reproductor Flotante */}
-      {minimized && (
-        <View
-          style={[
-            styles.miniHeader,
-            {
-              backgroundColor: colors.surface,
-              borderBottomColor: colors.border,
-            },
-          ]}
-        >
-          <View style={styles.miniControlsRow}>
-            <Pressable
-              testID="mini-player-expand"
-              accessibilityRole="button"
-              accessibilityLabel={`Ampliar ${title}`}
-              onPress={onExpand}
-              hitSlop={8}
-              style={({ pressed }) => [
-                styles.miniExpandButton,
-                { opacity: pressed ? 0.75 : 1 },
-              ]}
-            >
-              <View
-                style={[
-                  styles.miniRoundButton,
-                  { backgroundColor: colors.surfaceElevated },
-                ]}
-              >
-                <Ionicons
-                  name="expand-outline"
-                  size={config.theme.sizes.iconMd - 2}
-                  color={colors.text}
-                />
-              </View>
-              <Text
-                numberOfLines={1}
-                style={[styles.miniTitle, { color: colors.text }]}
-              >
-                {title}
-              </Text>
-            </Pressable>
-
-            <View style={styles.miniActionButtons}>
-              <Pressable
-                testID="mini-player-toggle-play"
-                accessibilityRole="button"
-                accessibilityLabel={isPlaying ? 'Pausar' : 'Reproducir'}
-                onPress={togglePlayPause}
-                hitSlop={10}
-                style={({ pressed }) => [
-                  styles.miniPlayPauseButton,
-                  {
-                    backgroundColor: colors.primary,
-                    opacity: pressed ? 0.85 : 1,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={isPlaying ? 'pause' : 'play'}
-                  size={config.theme.sizes.iconMd + 2}
-                  color={colors.badgeText}
-                />
-              </Pressable>
-
-              {onClose && (
-                <Pressable
-                  testID="mini-player-close"
-                  accessibilityRole="button"
-                  accessibilityLabel="Cerrar reproductor"
-                  onPress={onClose}
-                  hitSlop={10}
-                  style={({ pressed }) => [
-                    styles.miniRoundButton,
-                    {
-                      backgroundColor: colors.surfaceElevated,
-                      opacity: pressed ? 0.75 : 1,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name="close"
-                    size={config.theme.sizes.iconMd}
-                    color={colors.text}
-                  />
-                </Pressable>
-              )}
-            </View>
-          </View>
-
-          {isSleepActive && (
-            <View
-              testID="mini-player-sleep-banner"
-              style={[
-                styles.miniSleepRow,
-                {
-                  backgroundColor: colors.surfaceElevated,
-                  borderTopColor: colors.border,
-                },
-              ]}
-            >
-              <View style={styles.miniSleepInfo}>
-                <Ionicons
-                  name="moon"
-                  size={config.theme.sizes.iconSm - 2}
-                  color={colors.primary}
-                />
-                <Text
-                  numberOfLines={1}
-                  style={[styles.miniSleepText, { color: colors.text }]}
-                >
-                  {sleepButtonLabel}
-                </Text>
-              </View>
-              <Pressable
-                testID="mini-player-sleep-cancel"
-                accessibilityRole="button"
-                accessibilityLabel="Cancelar Sleep Mode"
-                onPress={handleCancelSleep}
-                hitSlop={8}
-              >
-                <Text style={[styles.miniSleepCancelText, { color: colors.primary }]}>
-                  Cancelar
-                </Text>
-              </Pressable>
-            </View>
-          )}
-
-          <View
-            style={[
-              styles.miniProgressTrack,
-              { backgroundColor: colors.progressTrack },
-            ]}
-          >
-            <View
-              style={[
-                styles.progressFill,
-                {
-                  backgroundColor: colors.progressFill,
-                  width: `${Math.round(progressRatio * 100)}%`,
-                },
-              ]}
-            />
-          </View>
-        </View>
-      )}
-
       {/* Contenedor 16:9 del vídeo: mantiene SIEMPRE el aspect ratio 16:9 tanto en grande como en flotante */}
       <View style={styles.aspectRatioFrame}>
         {playerError && !minimized ? (
@@ -626,6 +488,53 @@ export function VideoPlayer({
               </Pressable>
             </View>
           </View>
+        ) : isSleepTriggered ? (
+          <View
+            testID="sleep-mode-locked-overlay"
+            style={[
+              styles.sleepLockedOverlay,
+              { backgroundColor: '#000000' },
+            ]}
+          >
+            <Ionicons
+              name="moon"
+              size={config.theme.sizes.iconLg + 4}
+              color={colors.primary}
+            />
+            <Text style={[styles.sleepLockedTitle, { color: colors.badgeText }]}>
+              Sleep Mode finalizado
+            </Text>
+            <Text
+              style={[
+                styles.sleepLockedSubtitle,
+                { color: colors.textSecondary },
+              ]}
+            >
+              El vídeo se ha pausado y la pantalla se ha bloqueado.
+            </Text>
+            <Pressable
+              testID="sleep-mode-resume-button"
+              accessibilityRole="button"
+              accessibilityLabel="Reanudar reproducción"
+              onPress={handleResumeAfterSleep}
+              style={({ pressed }) => [
+                styles.actionBtn,
+                {
+                  backgroundColor: colors.primary,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+            >
+              <Ionicons
+                name="play"
+                size={config.theme.sizes.iconSm}
+                color={colors.badgeText}
+              />
+              <Text style={[styles.actionBtnText, { color: colors.badgeText }]}>
+                Continuar viendo
+              </Text>
+            </Pressable>
+          </View>
         ) : (
           <>
             <WebView
@@ -672,37 +581,19 @@ export function VideoPlayer({
               </View>
             )}
 
-            {isSleepTriggered && (
+            {minimized && (
               <View
-                testID="sleep-mode-locked-overlay"
-                style={[
-                  styles.sleepLockedOverlay,
-                  { backgroundColor: colors.overlay },
-                ]}
+                style={styles.miniVideoOverlayButtons}
+                pointerEvents="box-none"
               >
-                <Ionicons
-                  name="moon"
-                  size={config.theme.sizes.iconLg + 4}
-                  color={colors.primary}
-                />
-                <Text style={[styles.sleepLockedTitle, { color: colors.badgeText }]}>
-                  Sleep Mode finalizado
-                </Text>
-                <Text
-                  style={[
-                    styles.sleepLockedSubtitle,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  El vídeo se ha pausado y la pantalla se ha bloqueado.
-                </Text>
                 <Pressable
-                  testID="sleep-mode-resume-button"
+                  testID="mini-player-toggle-play"
                   accessibilityRole="button"
-                  accessibilityLabel="Reanudar reproducción"
-                  onPress={handleResumeAfterSleep}
+                  accessibilityLabel={isPlaying ? 'Pausar' : 'Reproducir'}
+                  onPress={togglePlayPause}
+                  hitSlop={10}
                   style={({ pressed }) => [
-                    styles.actionBtn,
+                    styles.miniPlayPauseButton,
                     {
                       backgroundColor: colors.primary,
                       opacity: pressed ? 0.85 : 1,
@@ -710,22 +601,141 @@ export function VideoPlayer({
                   ]}
                 >
                   <Ionicons
-                    name="play"
-                    size={config.theme.sizes.iconSm}
+                    name={isPlaying ? 'pause' : 'play'}
+                    size={config.theme.sizes.iconMd + 2}
                     color={colors.badgeText}
                   />
-                  <Text style={[styles.actionBtnText, { color: colors.badgeText }]}>
-                    Continuar viendo
-                  </Text>
                 </Pressable>
+
+                {onClose && (
+                  <Pressable
+                    testID="mini-player-close"
+                    accessibilityRole="button"
+                    accessibilityLabel="Cerrar reproductor"
+                    onPress={onClose}
+                    hitSlop={10}
+                    style={({ pressed }) => [
+                      styles.miniRoundButton,
+                      {
+                        backgroundColor: colors.badgeBackground,
+                        opacity: pressed ? 0.75 : 1,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="close"
+                      size={config.theme.sizes.iconMd}
+                      color={colors.badgeText}
+                    />
+                  </Pressable>
+                )}
               </View>
             )}
           </>
         )}
       </View>
 
-      {/* Barra de controles completa cuando NO está minimizado */}
-      {!minimized && (
+      {/* Barra compacta inferior cuando está en modo Mini Reproductor Flotante */}
+      {minimized ? (
+        <View
+          style={[
+            styles.miniFooter,
+            {
+              backgroundColor: colors.surface,
+              borderTopColor: colors.border,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.miniProgressTrack,
+              { backgroundColor: colors.progressTrack },
+            ]}
+          >
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  backgroundColor: colors.progressFill,
+                  width: `${Math.round(progressRatio * 100)}%`,
+                },
+              ]}
+            />
+          </View>
+
+          <View style={styles.miniControlsRow}>
+            <Pressable
+              testID="mini-player-expand"
+              accessibilityRole="button"
+              accessibilityLabel={`Ampliar ${title}`}
+              onPress={onExpand}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.miniExpandButton,
+                { opacity: pressed ? 0.75 : 1 },
+              ]}
+            >
+              <View
+                style={[
+                  styles.miniRoundButton,
+                  { backgroundColor: colors.surfaceElevated },
+                ]}
+              >
+                <Ionicons
+                  name="expand-outline"
+                  size={config.theme.sizes.iconMd - 2}
+                  color={colors.text}
+                />
+              </View>
+              <Text
+                numberOfLines={1}
+                style={[styles.miniTitle, { color: colors.text }]}
+              >
+                {title}
+              </Text>
+            </Pressable>
+          </View>
+
+          {isSleepActive && (
+            <View
+              testID="mini-player-sleep-banner"
+              style={[
+                styles.miniSleepRow,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  borderTopColor: colors.border,
+                },
+              ]}
+            >
+              <View style={styles.miniSleepInfo}>
+                <Ionicons
+                  name="moon"
+                  size={config.theme.sizes.iconSm - 2}
+                  color={colors.primary}
+                />
+                <Text
+                  numberOfLines={1}
+                  style={[styles.miniSleepText, { color: colors.text }]}
+                >
+                  {sleepButtonLabel}
+                </Text>
+              </View>
+              <Pressable
+                testID="mini-player-sleep-cancel"
+                accessibilityRole="button"
+                accessibilityLabel="Cancelar Sleep Mode"
+                onPress={handleCancelSleep}
+                hitSlop={8}
+              >
+                <Text style={[styles.miniSleepCancelText, { color: colors.primary }]}>
+                  Cancelar
+                </Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      ) : (
+        /* Barra de controles completa cuando NO está minimizado */
         <View
           style={[
             styles.controlsBar,
@@ -1038,9 +1048,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000000',
   },
-  miniHeader: {
+  miniVideoOverlayButtons: {
+    position: 'absolute',
+    top: config.theme.spacing.xs,
+    right: config.theme.spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: config.theme.spacing.xs,
+    zIndex: 10,
+  },
+  miniFooter: {
     width: '100%',
-    borderBottomWidth: config.theme.sizes.borderWidth,
+    borderTopWidth: config.theme.sizes.borderWidth,
   },
   miniProgressTrack: {
     width: '100%',
