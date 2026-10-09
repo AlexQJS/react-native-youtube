@@ -16,6 +16,7 @@ export default function PlayerRouteScreen() {
     channelId?: string;
     publishedAt?: string;
     durationSeconds?: string;
+    isShort?: string;
   }>();
 
   const videoId = typeof params.id === 'string' ? params.id : '';
@@ -32,6 +33,12 @@ export default function PlayerRouteScreen() {
         durationSeconds: params.durationSeconds
           ? Number(params.durationSeconds)
           : undefined,
+        isShort:
+          params.isShort === 'true' || params.isShort === '1'
+            ? true
+            : params.isShort === 'false' || params.isShort === '0'
+              ? false
+              : undefined,
       });
     }
   }, [
@@ -39,6 +46,7 @@ export default function PlayerRouteScreen() {
     params.channelId,
     params.channelTitle,
     params.durationSeconds,
+    params.isShort,
     params.publishedAt,
     params.title,
     videoId,

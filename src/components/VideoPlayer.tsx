@@ -6,6 +6,7 @@ import {
   Share,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
@@ -28,6 +29,7 @@ export interface VideoPlayerProps {
   channelTitle?: string;
   initialPosition?: number;
   initialDuration?: number;
+  isShort?: boolean;
   minimized?: boolean;
   onExpand?: () => void;
   onClose?: () => void;
@@ -219,6 +221,7 @@ export function VideoPlayer({
   title = 'Reproduciendo vídeo',
   initialPosition = 0,
   initialDuration = 0,
+  isShort = false,
   minimized = false,
   onExpand,
   onClose,
@@ -227,7 +230,21 @@ export function VideoPlayer({
   onRestartProgress,
 }: VideoPlayerProps) {
   const { colors } = useThemeColors();
+  const { height: windowHeight } = useWindowDimensions();
   const webViewRef = useRef<WebView | null>(null);
+
+  const shortMaxHeight = useMemo(() => {
+    if (!windowHeight || windowHeight <= 0) {
+      return 460;
+    }
+    return Math.max(
+      280,
+      Math.min(
+        Math.round(windowHeight * config.theme.sizes.shortsPlayerMaxHeightRatio),
+        windowHeight - config.theme.sizes.shortsPlayerReservedSpace
+      )
+    );
+  }, [windowHeight]);
 
   const [isReady, setIsReady] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -453,8 +470,18 @@ export function VideoPlayer({
       testID={minimized ? 'mini-player-container' : 'video-player-container'}
       style={styles.wrapper}
     >
-      {/* Contenedor 16:9 del vídeo: mantiene SIEMPRE el aspect ratio 16:9 tanto en grande como en flotante */}
-      <View style={styles.aspectRatioFrame}>
+      {/* Contenedor del vídeo: 16:9 estándar o 9:16 vertical adaptado a pantalla para Shorts */}
+      <View
+        testID="video-player-aspect-frame"
+        style={[
+          styles.aspectRatioFrame,
+          isShort &&
+            !minimized && [
+              styles.aspectRatioFrameShort,
+              { maxHeight: shortMaxHeight },
+            ],
+        ]}
+      >
         {playerError && !minimized ? (
           <View
             testID="player-error-view"
@@ -1087,6 +1114,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
     position: 'relative',
     overflow: 'hidden',
+  },
+  aspectRatioFrameShort: {
+    aspectRatio: config.theme.sizes.shortsAspectRatio,
+    alignSelf: 'center',
   },
   webView: {
     flex: 1,

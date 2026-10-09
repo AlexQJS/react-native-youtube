@@ -124,6 +124,8 @@ export const config = {
     sizes: {
       thumbnailAspectRatio: 16 / 9,
       shortsAspectRatio: 9 / 16,
+      shortsPlayerMaxHeightRatio: 0.58,
+      shortsPlayerReservedSpace: 280,
       channelAvatarSm: 36,
       channelAvatarMd: 56,
       channelAvatarLg: 72,

@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ import { useVideoComments } from '../hooks/useVideoComments';
 import { storage } from '../services/storage';
 import { VideoItem } from '../types/youtube';
 import {
+  detectIsShort,
   formatCompactCount,
   formatDuration,
   formatRelativeDate,
@@ -35,6 +37,7 @@ export function PersistentPlayerHost({
   const { activeVideo, isMinimized, minimizeVideo, expandVideo, closeVideo } =
     usePlayer();
   const { colors } = useThemeColors();
+  const { height: windowHeight } = useWindowDimensions();
 
   const videoId = activeVideo?.id ?? '';
   const [cachedDetails, setCachedDetails] = useState<VideoItem | null>(null);
@@ -133,9 +136,30 @@ export function PersistentPlayerHost({
     cachedDetails?.durationSeconds ||
     entry?.duration ||
     0;
+  const isShort = Boolean(
+    activeVideo.isShort ??
+      cachedDetails?.isShort ??
+      detectIsShort({
+        title,
+        description,
+        durationSeconds: initialDuration || undefined,
+      })
+  );
+  const shortMaxHeight =
+    windowHeight && windowHeight > 0
+      ? Math.max(
+          280,
+          Math.min(
+            Math.round(
+              windowHeight * config.theme.sizes.shortsPlayerMaxHeightRatio
+            ),
+            windowHeight - config.theme.sizes.shortsPlayerReservedSpace
+          )
+        )
+      : 460;
   const viewCount = activeVideo.viewCount ?? cachedDetails?.viewCount;
   const viewsLabel =
-    !activeVideo.isShort && viewCount !== undefined
+    !isShort && viewCount !== undefined
       ? formatViewCount(viewCount)
       : '';
 
@@ -218,9 +242,18 @@ export function PersistentPlayerHost({
         </View>
       )}
 
-      {/* Instancia persistente del reproductor (mantiene su aspect ratio 16:9 tanto en grande como en ventana flotante) */}
+      {/* Instancia persistente del reproductor (16:9 estándar o 9:16 vertical adaptado para Shorts) */}
       {progressLoading ? (
-        <View style={styles.aspectRatioLoadingBox}>
+        <View
+          style={[
+            styles.aspectRatioLoadingBox,
+            isShort &&
+              !isMinimized && [
+                styles.aspectRatioLoadingBoxShort,
+                { maxHeight: shortMaxHeight },
+              ],
+          ]}
+        >
           <ActivityIndicator size="small" color={colors.primary} />
         </View>
       ) : (
@@ -231,6 +264,7 @@ export function PersistentPlayerHost({
           channelTitle={channelTitle}
           initialPosition={resumePosition}
           initialDuration={initialDuration}
+          isShort={isShort}
           minimized={isMinimized}
           onExpand={expandVideo}
           onClose={handleClose}
@@ -904,6 +938,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  aspectRatioLoadingBoxShort: {
+    aspectRatio: config.theme.sizes.shortsAspectRatio,
+    alignSelf: 'center',
   },
   detailsContent: {
     padding: config.theme.spacing.lg,

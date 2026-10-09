@@ -306,4 +306,49 @@ describe('Sleep Mode en VideoPlayer', () => {
     expect(webview.props.mediaPlaybackRequiresUserAction).toBe(false);
     expect(webview.props.allowsInlineMediaPlayback).toBe(true);
   });
+
+  it('aplica aspect ratio vertical 9:16 con altura máxima adaptada cuando el vídeo es un Short', () => {
+    const { getByTestId, rerender } = render(
+      <VideoPlayer
+        videoId="short_vid_1"
+        title="Short de prueba"
+        isShort={true}
+        onProgressUpdate={mockOnProgressUpdate}
+        onFlushProgress={mockOnFlushProgress}
+        onRestartProgress={mockOnRestartProgress}
+      />
+    );
+
+    const frame = getByTestId('video-player-aspect-frame');
+    const flattenedShort = Object.assign(
+      {},
+      ...(Array.isArray(frame.props.style)
+        ? frame.props.style.flat().filter(Boolean)
+        : [frame.props.style])
+    );
+    expect(flattenedShort.aspectRatio).toBe(config.theme.sizes.shortsAspectRatio);
+    expect(flattenedShort.maxHeight).toBeGreaterThanOrEqual(280);
+
+    // En modo minimizado mantiene el formato compacto 16:9
+    rerender(
+      <VideoPlayer
+        videoId="short_vid_1"
+        title="Short de prueba"
+        isShort={true}
+        minimized={true}
+        onProgressUpdate={mockOnProgressUpdate}
+        onFlushProgress={mockOnFlushProgress}
+        onRestartProgress={mockOnRestartProgress}
+      />
+    );
+
+    const miniFrame = getByTestId('video-player-aspect-frame');
+    const flattenedMini = Object.assign(
+      {},
+      ...(Array.isArray(miniFrame.props.style)
+        ? miniFrame.props.style.flat().filter(Boolean)
+        : [miniFrame.props.style])
+    );
+    expect(flattenedMini.aspectRatio).toBe(config.theme.sizes.thumbnailAspectRatio);
+  });
 });
