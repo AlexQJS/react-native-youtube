@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Linking,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -424,6 +425,16 @@ export function VideoPlayer({
     const url = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
     Linking.openURL(url).catch(() => {});
   }, [videoId]);
+
+  const handleShareVideo = useCallback(() => {
+    const url = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    const message = title ? `${title}\n${url}` : url;
+    Share.share({
+      title: title || 'Compartir vídeo',
+      message,
+      url,
+    }).catch(() => {});
+  }, [title, videoId]);
 
   const progressRatio = calculateProgressRatio(currentPosition, duration);
 
@@ -862,6 +873,29 @@ export function VideoPlayer({
               />
               <Text style={[styles.controlButtonText, { color: colors.text }]}>
                 Desde el inicio
+              </Text>
+            </Pressable>
+
+            <Pressable
+              testID="player-share-button"
+              accessibilityRole="button"
+              accessibilityLabel="Compartir vídeo"
+              onPress={handleShareVideo}
+              style={({ pressed }) => [
+                styles.controlButton,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  opacity: pressed ? 0.8 : 1,
+                },
+              ]}
+            >
+              <Ionicons
+                name="share-social-outline"
+                size={config.theme.sizes.iconSm}
+                color={colors.text}
+              />
+              <Text style={[styles.controlButtonText, { color: colors.text }]}>
+                Compartir
               </Text>
             </Pressable>
           </View>

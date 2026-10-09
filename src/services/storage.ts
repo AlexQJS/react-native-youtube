@@ -10,17 +10,23 @@ import {
 } from '../types/youtube';
 import { isVideoCompleted, shouldSaveProgress } from '../utils/format';
 
+export type ThemeMode = 'light' | 'dark';
+
 type FavoritesListener = (favorites: FavoriteChannel[]) => void;
 type ProgressListener = (progress: PlaybackProgressMap) => void;
 type HistoryListener = (history: WatchHistoryItem[]) => void;
+type ThemeModeListener = (mode: ThemeMode) => void;
 
 const favoritesListeners = new Set<FavoritesListener>();
 const progressListeners = new Set<ProgressListener>();
 const historyListeners = new Set<HistoryListener>();
+const themeListeners = new Set<ThemeModeListener>();
 
 let memoryFavorites: FavoriteChannel[] | null = null;
 let memoryProgress: PlaybackProgressMap | null = null;
 let memoryHistory: WatchHistoryItem[] | null = null;
+let memoryThemeMode: ThemeMode | null = null;
+let memoryThemeLoaded = false;
 
 function notifyFavorites(favorites: FavoriteChannel[]) {
   favoritesListeners.forEach((listener) => {
@@ -46,6 +52,16 @@ function notifyHistory(history: WatchHistoryItem[]) {
   historyListeners.forEach((listener) => {
     try {
       listener(history);
+    } catch {
+      // Evitar que un listener defectuoso rompa el flujo
+    }
+  });
+}
+
+function notifyThemeMode(mode: ThemeMode) {
+  themeListeners.forEach((listener) => {
+    try {
+      listener(mode);
     } catch {
       // Evitar que un listener defectuoso rompa el flujo
     }
@@ -210,6 +226,73 @@ export const storage = {
     memoryFavorites = null;
     memoryProgress = null;
     memoryHistory = null;
+    memoryThemeMode = null;
+    memoryThemeLoaded = false;
+  },
+
+  /**
+   * Suscribe un callback a cambios en el modo de tema (light / dark).
+   */
+  subscribeThemeMode(listener: ThemeModeListener): () => void {
+    themeListeners.add(listener);
+    return () => {
+      themeListeners.delete(listener);
+    };
+  },
+
+  /**
+   * Devuelve de forma síncrona el modo de tema cargado en memoria (si existe).
+   */
+  getSyncThemeMode(): ThemeMode | null {
+    return memoryThemeMode;
+  },
+
+  /**
+   * Indica si ya se ha consultado el modo de tema persistido en esta sesión.
+   */
+  isThemeLoaded(): boolean {
+    return memoryThemeLoaded;
+  },
+
+  /**
+   * Obtiene el modo de tema almacenado en AsyncStorage ('light' | 'dark').
+   */
+  async getThemeMode(): Promise<ThemeMode | null> {
+    if (memoryThemeLoaded) {
+      return memoryThemeMode;
+    }
+
+    try {
+      const raw = await AsyncStorage.getItem(config.storageKeys.themeMode);
+      memoryThemeLoaded = true;
+      if (raw === 'light' || raw === 'dark') {
+        const changed = memoryThemeMode !== raw;
+        memoryThemeMode = raw;
+        if (changed) {
+          notifyThemeMode(raw);
+        }
+        return raw;
+      }
+      return memoryThemeMode;
+    } catch {
+      memoryThemeLoaded = true;
+      return memoryThemeMode;
+    }
+  },
+
+  /**
+   * Guarda el modo de tema seleccionado por el usuario y notifica a todos los observadores.
+   */
+  async saveThemeMode(mode: ThemeMode): Promise<void> {
+    const validMode: ThemeMode = mode === 'light' ? 'light' : 'dark';
+    memoryThemeMode = validMode;
+    memoryThemeLoaded = true;
+    notifyThemeMode(validMode);
+    try {
+      await AsyncStorage.setItem(config.storageKeys.themeMode, validMode);
+    } catch {
+      // No bloquear la UI si falla la escritura secundaria
+    }
   },
 
   /**

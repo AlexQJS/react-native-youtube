@@ -1,4 +1,5 @@
 import { config } from '../config/config';
+import { WatchHistoryItem } from '../types/youtube';
 
 /**
  * Convierte una duración ISO 8601 de YouTube (ej. "PT1H12M30S", "PT5M", "PT42S")
@@ -308,4 +309,207 @@ export function formatCompactCount(count?: number): string {
   const millions = rounded / 1_000_000;
   const formatted = millions.toFixed(1).replace('.0', '').replace('.', ',');
   return `${formatted} M`;
+}
+
+export interface DailyWatchStat {
+  /** Clave de fecha local en formato YYYY-MM-DD */
+  dateKey: string;
+  /** Etiqueta abreviada del día en español (Lun, Mar, Mié, Jue, Vie, Sáb, Dom) */
+  dayLabel: string;
+  /** Segundos totales reproducidos en ese día */
+  seconds: number;
+  /** Cantidad de vídeos vistos en ese día */
+  videoCount: number;
+  /** Porcentaje de altura de la barra respecto al día de mayor consumo (0 a 100) */
+  heightPercent: number;
+  /** Indica si este día corresponde al día actual */
+  isToday: boolean;
+}
+
+export interface WeeklyWatchStats {
+  days: DailyWatchStat[];
+  totalSeconds: number;
+  totalVideos: number;
+  averageSecondsPerDay: number;
+  maxDaySeconds: number;
+}
+
+const SPANISH_SHORT_DAYS = [
+  'Dom',
+  'Lun',
+  'Mar',
+  'Mié',
+  'Jue',
+  'Vie',
+  'Sáb',
+] as const;
+
+export function toLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Formatea segundos totales de visualización en texto legible (ej. "0 min", "45 s", "25 min", "1 h 15 min").
+ */
+export function formatWatchTime(totalSeconds?: number): string {
+  if (
+    totalSeconds === undefined ||
+    totalSeconds === null ||
+    !Number.isFinite(totalSeconds) ||
+    totalSeconds <= 0
+  ) {
+    return '0 min';
+  }
+
+  const rounded = Math.floor(totalSeconds);
+  if (rounded < 60) {
+    return `${rounded} s`;
+  }
+
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.round((rounded % 3600) / 60);
+
+  if (hours > 0) {
+    if (minutes === 60) {
+      return `${hours + 1} h`;
+    }
+    return minutes > 0 ? `${hours} h ${minutes} min` : `${hours} h`;
+  }
+
+  return `${Math.max(1, Math.round(rounded / 60))} min`;
+}
+
+/**
+ * Formatea segundos totales de visualización en etiqueta compacta para barras (ej. "0m", "45s", "15m", "1h 20m").
+ */
+export function formatBarTimeLabel(totalSeconds?: number): string {
+  if (
+    totalSeconds === undefined ||
+    totalSeconds === null ||
+    !Number.isFinite(totalSeconds) ||
+    totalSeconds <= 0
+  ) {
+    return '0m';
+  }
+
+  const rounded = Math.floor(totalSeconds);
+  if (rounded < 60) {
+    return `${rounded}s`;
+  }
+
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.round((rounded % 3600) / 60);
+
+  if (hours > 0) {
+    if (minutes === 60) {
+      return `${hours + 1}h`;
+    }
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+
+  return `${Math.max(1, Math.round(rounded / 60))}m`;
+}
+
+/**
+ * Calcula las estadísticas de tiempo visto durante los últimos 7 días (esta semana)
+ * desglosadas día por día para representarlas en un gráfico de barras.
+ */
+export function computeWeeklyWatchStats(
+  history: WatchHistoryItem[],
+  referenceDate: Date = new Date()
+): WeeklyWatchStats {
+  const dayBuckets: Array<{
+    dateKey: string;
+    dayLabel: string;
+    seconds: number;
+    videoCount: number;
+    isToday: boolean;
+  }> = [];
+
+  const bucketByDateKey = new Map<
+    string,
+    {
+      dateKey: string;
+      dayLabel: string;
+      seconds: number;
+      videoCount: number;
+      isToday: boolean;
+    }
+  >();
+
+  for (let offset = 6; offset >= 0; offset -= 1) {
+    const d = new Date(
+      referenceDate.getFullYear(),
+      referenceDate.getMonth(),
+      referenceDate.getDate() - offset
+    );
+    const dateKey = toLocalDateKey(d);
+    const dayLabel = SPANISH_SHORT_DAYS[d.getDay()] ?? 'Día';
+    const bucket = {
+      dateKey,
+      dayLabel,
+      seconds: 0,
+      videoCount: 0,
+      isToday: offset === 0,
+    };
+    dayBuckets.push(bucket);
+    bucketByDateKey.set(dateKey, bucket);
+  }
+
+  if (Array.isArray(history)) {
+    for (const item of history) {
+      if (!item || typeof item.watchedAt !== 'number') {
+        continue;
+      }
+      const watchedDate = new Date(item.watchedAt);
+      if (Number.isNaN(watchedDate.getTime())) {
+        continue;
+      }
+
+      const key = toLocalDateKey(watchedDate);
+      const targetBucket = bucketByDateKey.get(key);
+      if (!targetBucket) {
+        continue;
+      }
+
+      const effectiveDuration =
+        item.duration || item.video?.durationSeconds || 0;
+      const watchedSeconds =
+        item.position > 0
+          ? Math.floor(item.position)
+          : item.completed && effectiveDuration > 0
+            ? Math.floor(effectiveDuration)
+            : 0;
+
+      targetBucket.seconds += Math.max(0, watchedSeconds);
+      targetBucket.videoCount += 1;
+    }
+  }
+
+  const maxDaySeconds = dayBuckets.reduce(
+    (max, day) => Math.max(max, day.seconds),
+    0
+  );
+  const totalSeconds = dayBuckets.reduce((sum, day) => sum + day.seconds, 0);
+  const totalVideos = dayBuckets.reduce((sum, day) => sum + day.videoCount, 0);
+  const averageSecondsPerDay = Math.round(totalSeconds / 7);
+
+  const days: DailyWatchStat[] = dayBuckets.map((day) => ({
+    ...day,
+    heightPercent:
+      maxDaySeconds > 0 && day.seconds > 0
+        ? Math.max(10, Math.round((day.seconds / maxDaySeconds) * 100))
+        : 0,
+  }));
+
+  return {
+    days,
+    totalSeconds,
+    totalVideos,
+    averageSecondsPerDay,
+    maxDaySeconds,
+  };
 }

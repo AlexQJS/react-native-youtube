@@ -33,7 +33,9 @@ function BottomNavigationBar() {
 
   const isSearchActive = pathname.startsWith('/search');
   const isHistoryActive = pathname.startsWith('/history');
-  const isFeedActive = !isSearchActive && !isHistoryActive;
+  const isConfigActive = pathname.startsWith('/config');
+  const isFeedActive =
+    !isSearchActive && !isHistoryActive && !isConfigActive;
 
   return (
     <View
@@ -123,6 +125,32 @@ function BottomNavigationBar() {
           Historial
         </Text>
       </Pressable>
+
+      <Pressable
+        testID="nav-tab-config"
+        accessibilityRole="tab"
+        accessibilityState={{ selected: isConfigActive }}
+        onPress={() => {
+          if (!isConfigActive) {
+            router.navigate('/config');
+          }
+        }}
+        style={styles.tabItem}
+      >
+        <Ionicons
+          name={isConfigActive ? 'settings' : 'settings-outline'}
+          size={config.theme.sizes.iconMd}
+          color={isConfigActive ? colors.primary : colors.textSecondary}
+        />
+        <Text
+          style={[
+            styles.tabLabel,
+            { color: isConfigActive ? colors.primary : colors.textSecondary },
+          ]}
+        >
+          Config
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -208,6 +236,13 @@ function AppShell() {
               options={{
                 title: 'Historial',
                 headerTitle: 'Historial de reproducción',
+              }}
+            />
+            <Tabs.Screen
+              name="config"
+              options={{
+                title: 'Config',
+                headerTitle: 'Configuración',
               }}
             />
             <Tabs.Screen

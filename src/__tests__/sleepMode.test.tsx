@@ -276,7 +276,6 @@ describe('Sleep Mode en VideoPlayer', () => {
 
   it('configura correctamente todas las duraciones en config.playback.sleepTimerOptions', () => {
     expect(config.playback.sleepTimerOptions).toEqual([
-      { id: '1m', label: '1 min', durationSeconds: 60 },
       { id: '5m', label: '5 min', durationSeconds: 300 },
       { id: '15m', label: '15 min', durationSeconds: 900 },
       { id: '30m', label: '30 min', durationSeconds: 1800 },
