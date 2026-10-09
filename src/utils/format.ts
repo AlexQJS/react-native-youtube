@@ -283,4 +283,29 @@ export function parseViewCountText(text?: string): number | undefined {
   return undefined;
 }
 
+/**
+ * Formatea una cifra de forma compacta en español (p.ej. 42 -> "42", 1400 -> "1,4 mil", 2100000 -> "2,1 M").
+ */
+export function formatCompactCount(count?: number): string {
+  if (count === undefined || count === null || !Number.isFinite(count) || count <= 0) {
+    return '';
+  }
 
+  const rounded = Math.floor(count);
+  if (rounded < 1000) {
+    return `${rounded}`;
+  }
+
+  if (rounded < 1_000_000) {
+    const thousands = rounded / 1000;
+    const formatted =
+      thousands >= 100
+        ? Math.round(thousands).toString()
+        : thousands.toFixed(1).replace('.0', '').replace('.', ',');
+    return `${formatted} mil`;
+  }
+
+  const millions = rounded / 1_000_000;
+  const formatted = millions.toFixed(1).replace('.0', '').replace('.', ',');
+  return `${formatted} M`;
+}

@@ -1,8 +1,10 @@
 import { config } from '../config/config';
 import {
   FavoriteChannel,
+  VideoComment,
   VideoItem,
   YouTubeAppError,
+  YouTubeCommentThreadsResponse,
   YouTubePlaylistItemsResponse,
   YouTubeSearchResponse,
   YouTubeVideosResponse,
@@ -1093,4 +1095,517 @@ export const youtubeService = {
     inFlightRequests.set(requestKey, requestPromise);
     return requestPromise;
   },
+
+  /**
+   * Obtiene los comentarios principales de un vídeo de YouTube, tanto con API Key
+   * (YouTube Data API v3 commentThreads) como sin API Key (endpoint público InnerTube /next).
+   */
+  async getVideoComments(
+    videoId: string,
+    apiKeyOverride?: string
+  ): Promise<VideoComment[]> {
+    const trimmed = videoId.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    const apiKey = getActiveApiKey(apiKeyOverride);
+    const requestKey = `comments:${apiKey ? 'api' : 'nokey'}:${trimmed}`;
+    const existing = inFlightRequests.get(requestKey);
+    if (existing) {
+      return existing;
+    }
+
+    const requestPromise = (async () => {
+      try {
+        if (!apiKey) {
+          return await fetchVideoCommentsWithoutKey(trimmed);
+        }
+
+        const params = new URLSearchParams({
+          part: 'snippet',
+          videoId: trimmed,
+          maxResults: String(config.comments.maxResults),
+          order: 'relevance',
+          textFormat: 'plainText',
+          key: apiKey,
+        });
+
+        try {
+          const url = `${config.api.baseUrl}/commentThreads?${params.toString()}`;
+          const data = await fetchYouTubeJson<YouTubeCommentThreadsResponse>(url);
+          const items = data.items ?? [];
+          const comments: VideoComment[] = [];
+          const seen = new Set<string>();
+
+          for (const item of items) {
+            const topComment = item.snippet?.topLevelComment;
+            const topSnippet = topComment?.snippet;
+            const id = topComment?.id ?? item.id ?? '';
+            const rawText = topSnippet?.textOriginal ?? topSnippet?.textDisplay ?? '';
+            const text = decodeHtmlEntities(rawText).trim();
+
+            if (!id || !text || seen.has(id)) {
+              continue;
+            }
+            seen.add(id);
+
+            const authorName =
+              decodeHtmlEntities(topSnippet?.authorDisplayName ?? '').trim() ||
+              'Usuario de YouTube';
+            const authorAvatar = normalizeThumbnailUrl(topSnippet?.authorProfileImageUrl) || undefined;
+            const publishedAt = topSnippet?.publishedAt ?? '';
+            const likeCount =
+              typeof topSnippet?.likeCount === 'number' && topSnippet.likeCount > 0
+                ? topSnippet.likeCount
+                : undefined;
+            const replyCount =
+              typeof item.snippet?.totalReplyCount === 'number' &&
+              item.snippet.totalReplyCount > 0
+                ? item.snippet.totalReplyCount
+                : undefined;
+
+            comments.push({
+              id,
+              authorName,
+              text,
+              publishedAt,
+              ...(authorAvatar ? { authorAvatar } : {}),
+              ...(likeCount !== undefined ? { likeCount } : {}),
+              ...(replyCount !== undefined ? { replyCount } : {}),
+            });
+          }
+
+          return comments;
+        } catch (err) {
+          if (
+            err instanceof YouTubeAppError &&
+            (err.statusCode === 403 || err.statusCode === 404)
+          ) {
+            return [];
+          }
+          throw err;
+        }
+      } finally {
+        inFlightRequests.delete(requestKey);
+      }
+    })();
+
+    inFlightRequests.set(requestKey, requestPromise);
+    return requestPromise;
+  },
 };
+
+/**
+ * Extrae el token de continuación de la sección de comentarios en la respuesta inicial de /youtubei/v1/next.
+ */
+function extractCommentsContinuationToken(data: any): string | null {
+  const panels = data?.engagementPanels;
+  if (Array.isArray(panels)) {
+    for (const panel of panels) {
+      const renderer = panel?.engagementPanelSectionListRenderer;
+      const panelId = renderer?.panelIdentifier ?? renderer?.targetId ?? '';
+      if (panelId === 'engagement-panel-comments-section') {
+        const sortToken =
+          renderer?.header?.engagementPanelTitleHeaderRenderer?.menu
+            ?.sortFilterSubMenuRenderer?.subMenuItems?.[0]?.serviceEndpoint
+            ?.continuationCommand?.token;
+        if (typeof sortToken === 'string' && sortToken.trim()) {
+          return sortToken.trim();
+        }
+
+        const sectionContents = renderer?.content?.sectionListRenderer?.contents ?? [];
+        for (const section of sectionContents) {
+          const items = section?.itemSectionRenderer?.contents ?? [];
+          for (const item of items) {
+            const token =
+              item?.continuationItemRenderer?.continuationEndpoint
+                ?.continuationCommand?.token ??
+              item?.continuationItemRenderer?.button?.buttonRenderer?.command
+                ?.continuationCommand?.token;
+            if (typeof token === 'string' && token.trim()) {
+              return token.trim();
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const watchContents =
+    data?.contents?.twoColumnWatchNextResults?.results?.results?.contents ?? [];
+  for (const entry of watchContents) {
+    const section = entry?.itemSectionRenderer;
+    if (!section) continue;
+    const items = section.contents ?? [];
+    for (const item of items) {
+      const token =
+        item?.continuationItemRenderer?.continuationEndpoint?.continuationCommand
+          ?.token ??
+        item?.continuationItemRenderer?.button?.buttonRenderer?.command
+          ?.continuationCommand?.token;
+      if (typeof token === 'string' && token.trim()) {
+        return token.trim();
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Si la primera continuación devuelve una cabecera con submenú o segundo token antes del listado,
+ * extrae ese segundo token de continuación.
+ */
+function extractSecondaryCommentsContinuationToken(data: any): string | null {
+  const endpoints = Array.isArray(data?.onResponseReceivedEndpoints)
+    ? data.onResponseReceivedEndpoints
+    : [];
+
+  for (const ep of endpoints) {
+    const items =
+      ep?.reloadContinuationItemsCommand?.continuationItems ??
+      ep?.appendContinuationItemsAction?.continuationItems ??
+      [];
+    for (const item of items) {
+      const headerSortToken =
+        item?.commentsHeaderRenderer?.sortMenu?.sortFilterSubMenuRenderer
+          ?.subMenuItems?.[0]?.serviceEndpoint?.continuationCommand?.token;
+      if (typeof headerSortToken === 'string' && headerSortToken.trim()) {
+        return headerSortToken.trim();
+      }
+
+      const contToken =
+        item?.continuationItemRenderer?.continuationEndpoint
+          ?.continuationCommand?.token ??
+        item?.continuationItemRenderer?.button?.buttonRenderer?.command
+          ?.continuationCommand?.token;
+      if (typeof contToken === 'string' && contToken.trim()) {
+        return contToken.trim();
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Convierte un commentEntityPayload moderno de InnerTube (frameworkUpdates) en VideoComment.
+ */
+function parseCommentEntityPayload(
+  payload: any,
+  fallbackId?: string
+): VideoComment | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const id: string =
+    payload.properties?.commentId ?? payload.key ?? fallbackId ?? '';
+  const rawText: string = payload.properties?.content?.content ?? '';
+  const text = decodeHtmlEntities(rawText).trim();
+
+  if (!id || !text) {
+    return null;
+  }
+
+  const rawAuthor: string = payload.author?.displayName ?? '';
+  const authorName =
+    decodeHtmlEntities(rawAuthor).trim() || 'Usuario de YouTube';
+  const authorAvatar =
+    normalizeThumbnailUrl(payload.author?.avatarThumbnailUrl) || undefined;
+  const publishedAt = decodeHtmlEntities(
+    payload.properties?.publishedTime ?? ''
+  ).trim();
+
+  const likeText: string =
+    payload.toolbar?.likeCountNotliked ??
+    payload.toolbar?.likeCountLiked ??
+    '';
+  const likeCount = parseViewCountText(likeText);
+
+  const replyText: string = payload.toolbar?.replyCount ?? '';
+  const replyCount = parseViewCountText(replyText);
+
+  return {
+    id,
+    authorName,
+    text,
+    publishedAt,
+    ...(authorAvatar ? { authorAvatar } : {}),
+    ...(likeCount !== undefined && likeCount > 0 ? { likeCount } : {}),
+    ...(replyCount !== undefined && replyCount > 0 ? { replyCount } : {}),
+  };
+}
+
+/**
+ * Parsea la respuesta de continuación de InnerTube soportando tanto commentRenderer clásico
+ * como commentEntityPayload moderno (frameworkUpdates.entityBatchUpdate.mutations).
+ */
+function parseInnerTubeComments(data: any): VideoComment[] {
+  const comments: VideoComment[] = [];
+  const seen = new Set<string>();
+
+  const endpoints = Array.isArray(data?.onResponseReceivedEndpoints)
+    ? data.onResponseReceivedEndpoints
+    : [];
+
+  const continuationItems: any[] = [];
+  for (const ep of endpoints) {
+    const reloadItems = ep?.reloadContinuationItemsCommand?.continuationItems;
+    if (Array.isArray(reloadItems)) {
+      continuationItems.push(...reloadItems);
+    }
+    const appendItems = ep?.appendContinuationItemsAction?.continuationItems;
+    if (Array.isArray(appendItems)) {
+      continuationItems.push(...appendItems);
+    }
+  }
+
+  const entityPayloadsById = new Map<string, any>();
+  const orderedEntityPayloads: any[] = [];
+  const mutations = data?.frameworkUpdates?.entityBatchUpdate?.mutations;
+  if (Array.isArray(mutations)) {
+    for (const mutation of mutations) {
+      const payload = mutation?.payload?.commentEntityPayload;
+      if (payload) {
+        const cid = payload?.properties?.commentId ?? mutation?.entityKey ?? '';
+        if (cid) {
+          entityPayloadsById.set(cid, payload);
+        }
+        orderedEntityPayloads.push(payload);
+      }
+    }
+  }
+
+  for (const item of continuationItems) {
+    const thread = item?.commentThreadRenderer;
+    const classicRenderer =
+      thread?.comment?.commentRenderer ?? item?.commentRenderer;
+
+    if (classicRenderer) {
+      const id: string = classicRenderer.commentId ?? '';
+      const rawAuthor: string =
+        classicRenderer.authorText?.simpleText ??
+        classicRenderer.authorText?.runs?.map((r: any) => r.text).join('') ??
+        '';
+      const authorName =
+        decodeHtmlEntities(rawAuthor).trim() || 'Usuario de YouTube';
+      const rawText: string =
+        classicRenderer.contentText?.runs?.map((r: any) => r.text).join('') ??
+        classicRenderer.contentText?.simpleText ??
+        '';
+      const text = decodeHtmlEntities(rawText).trim();
+
+      if (!id || !text || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+
+      const thumbs: Array<{ url?: string }> =
+        classicRenderer.authorThumbnail?.thumbnails ?? [];
+      const bestThumb =
+        thumbs[thumbs.length - 1]?.url ?? thumbs[0]?.url ?? '';
+      const authorAvatar = normalizeThumbnailUrl(bestThumb) || undefined;
+
+      const rawPublished: string =
+        classicRenderer.publishedTimeText?.runs
+          ?.map((r: any) => r.text)
+          .join('') ??
+        classicRenderer.publishedTimeText?.simpleText ??
+        '';
+      const publishedAt = decodeHtmlEntities(rawPublished).trim();
+
+      const voteText: string =
+        classicRenderer.voteCount?.simpleText ??
+        classicRenderer.voteCount?.runs?.map((r: any) => r.text).join('') ??
+        '';
+      const likeCount = parseViewCountText(voteText);
+
+      const rawReplyCount =
+        typeof classicRenderer.replyCount === 'number'
+          ? classicRenderer.replyCount
+          : undefined;
+
+      comments.push({
+        id,
+        authorName,
+        text,
+        publishedAt,
+        ...(authorAvatar ? { authorAvatar } : {}),
+        ...(likeCount !== undefined && likeCount > 0 ? { likeCount } : {}),
+        ...(rawReplyCount !== undefined && rawReplyCount > 0
+          ? { replyCount: rawReplyCount }
+          : {}),
+      });
+
+      if (comments.length >= config.comments.maxResults) {
+        return comments;
+      }
+      continue;
+    }
+
+    const viewModelCommentId: string =
+      thread?.commentViewModel?.commentViewModel?.commentId ?? '';
+    if (viewModelCommentId && entityPayloadsById.has(viewModelCommentId)) {
+      const payload = entityPayloadsById.get(viewModelCommentId);
+      const parsed = parseCommentEntityPayload(payload, viewModelCommentId);
+      if (parsed && !seen.has(parsed.id)) {
+        seen.add(parsed.id);
+        comments.push(parsed);
+        if (comments.length >= config.comments.maxResults) {
+          return comments;
+        }
+      }
+    }
+  }
+
+  for (const payload of orderedEntityPayloads) {
+    const replyLevel = Number(payload?.properties?.replyLevel ?? 0);
+    if (replyLevel > 0) {
+      continue;
+    }
+    const parsed = parseCommentEntityPayload(payload);
+    if (parsed && !seen.has(parsed.id)) {
+      seen.add(parsed.id);
+      comments.push(parsed);
+      if (comments.length >= config.comments.maxResults) {
+        return comments;
+      }
+    }
+  }
+
+  return comments;
+}
+
+/**
+ * Obtiene los comentarios de un vídeo sin necesidad de API Key utilizando
+ * el endpoint público de YouTube (/youtubei/v1/next).
+ */
+async function fetchVideoCommentsWithoutKey(
+  videoId: string
+): Promise<VideoComment[]> {
+  const clientContext = {
+    client: {
+      clientName: 'WEB',
+      clientVersion: '2.20241001.00.00',
+      hl: 'es',
+    },
+  };
+
+  let initialResponse: Response;
+  try {
+    initialResponse = await fetch(
+      'https://www.youtube.com/youtubei/v1/next?prettyPrint=false',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          context: clientContext,
+          videoId,
+        }),
+      }
+    );
+  } catch {
+    throw new YouTubeAppError(
+      'No se pudo conectar con YouTube para cargar los comentarios.',
+      'NETWORK_ERROR',
+      true
+    );
+  }
+
+  if (initialResponse.status === 429) {
+    throw new YouTubeAppError(
+      'Demasiadas peticiones seguidas a YouTube. Inténtalo de nuevo más tarde.',
+      'RATE_LIMIT',
+      true,
+      429
+    );
+  }
+
+  if (!initialResponse.ok) {
+    throw new YouTubeAppError(
+      `No se pudieron obtener los comentarios del vídeo (${initialResponse.status}).`,
+      'API_ERROR',
+      true,
+      initialResponse.status
+    );
+  }
+
+  const initialData: any = await initialResponse.json();
+  const directComments = parseInnerTubeComments(initialData);
+  if (directComments.length > 0) {
+    return directComments;
+  }
+
+  const continuationToken = extractCommentsContinuationToken(initialData);
+  if (!continuationToken) {
+    return [];
+  }
+
+  let contResponse: Response;
+  try {
+    contResponse = await fetch(
+      'https://www.youtube.com/youtubei/v1/next?prettyPrint=false',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          context: clientContext,
+          continuation: continuationToken,
+        }),
+      }
+    );
+  } catch {
+    throw new YouTubeAppError(
+      'No se pudo conectar con YouTube para cargar los comentarios.',
+      'NETWORK_ERROR',
+      true
+    );
+  }
+
+  if (!contResponse.ok) {
+    return [];
+  }
+
+  const contData: any = await contResponse.json();
+  const parsed = parseInnerTubeComments(contData);
+  if (parsed.length > 0) {
+    return parsed;
+  }
+
+  const secondaryToken = extractSecondaryCommentsContinuationToken(contData);
+  if (secondaryToken && secondaryToken !== continuationToken) {
+    try {
+      const secondResponse = await fetch(
+        'https://www.youtube.com/youtubei/v1/next?prettyPrint=false',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            context: clientContext,
+            continuation: secondaryToken,
+          }),
+        }
+      );
+      if (secondResponse.ok) {
+        const secondData: any = await secondResponse.json();
+        return parseInnerTubeComments(secondData);
+      }
+    } catch {
+      // Ignorar fallo en continuación secundaria
+    }
+  }
+
+  return [];
+}
+

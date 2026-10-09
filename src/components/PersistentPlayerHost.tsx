@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,9 +14,11 @@ import { config } from '../config/config';
 import { usePlayer } from '../context/PlayerContext';
 import { usePlaybackProgress } from '../hooks/usePlaybackProgress';
 import { useThemeColors } from '../hooks/useThemeColors';
+import { useVideoComments } from '../hooks/useVideoComments';
 import { storage } from '../services/storage';
 import { VideoItem } from '../types/youtube';
 import {
+  formatCompactCount,
   formatDuration,
   formatRelativeDate,
   formatViewCount,
@@ -35,6 +38,8 @@ export function PersistentPlayerHost({
 
   const videoId = activeVideo?.id ?? '';
   const [cachedDetails, setCachedDetails] = useState<VideoItem | null>(null);
+  const [isDescriptionExpanded, setIsDescriptionExpanded] =
+    useState<boolean>(false);
 
   const {
     loading: progressLoading,
@@ -46,8 +51,16 @@ export function PersistentPlayerHost({
     restartVideoProgress,
   } = usePlaybackProgress(videoId || undefined);
 
+  const {
+    comments,
+    loading: commentsLoading,
+    error: commentsError,
+    refresh: refreshComments,
+  } = useVideoComments(videoId || undefined);
+
   useEffect(() => {
     let mounted = true;
+    setIsDescriptionExpanded(false);
     if (videoId) {
       storage.getCachedVideo(videoId).then((cached) => {
         if (mounted) {
@@ -292,6 +305,7 @@ export function PersistentPlayerHost({
 
           {description ? (
             <View
+              testID="video-description-card"
               style={[
                 styles.descriptionCard,
                 {
@@ -301,6 +315,12 @@ export function PersistentPlayerHost({
               ]}
             >
               <Text
+                testID="video-description-text"
+                numberOfLines={
+                  isDescriptionExpanded
+                    ? undefined
+                    : config.comments.descriptionCollapsedLines
+                }
                 style={[
                   styles.descriptionText,
                   { color: colors.textSecondary },
@@ -308,8 +328,290 @@ export function PersistentPlayerHost({
               >
                 {description}
               </Text>
+
+              <Pressable
+                testID="description-toggle-button"
+                accessibilityRole="button"
+                accessibilityLabel={
+                  isDescriptionExpanded ? 'Ver menos' : 'Ver más'
+                }
+                onPress={() => setIsDescriptionExpanded((prev) => !prev)}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.descriptionToggleButton,
+                  { opacity: pressed ? 0.7 : 1 },
+                ]}
+              >
+                <Text
+                  testID="description-toggle-text"
+                  style={[
+                    styles.descriptionToggleText,
+                    { color: colors.primary },
+                  ]}
+                >
+                  {isDescriptionExpanded ? 'Ver menos' : 'Ver más'}
+                </Text>
+                <Ionicons
+                  name={isDescriptionExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={config.theme.sizes.iconSm}
+                  color={colors.primary}
+                />
+              </Pressable>
             </View>
           ) : null}
+
+          {/* Sección de comentarios del vídeo (debajo de la descripción) */}
+          <View
+            testID="video-comments-section"
+            style={[
+              styles.commentsSection,
+              {
+                borderTopColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.commentsHeader}>
+              <View style={styles.commentsHeaderTitleRow}>
+                <Ionicons
+                  name="chatbubble-ellipses-outline"
+                  size={config.theme.sizes.iconSm + 2}
+                  color={colors.text}
+                />
+                <Text
+                  style={[styles.commentsHeaderTitle, { color: colors.text }]}
+                >
+                  Comentarios
+                </Text>
+                {!commentsLoading && comments.length > 0 ? (
+                  <Text
+                    testID="video-comments-count"
+                    style={[
+                      styles.commentsCountBadge,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    ({comments.length})
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+
+            {commentsLoading && comments.length === 0 ? (
+              <View
+                testID="video-comments-loading"
+                style={[
+                  styles.commentsStateCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text
+                  style={[
+                    styles.commentsStateText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Cargando comentarios...
+                </Text>
+              </View>
+            ) : commentsError && comments.length === 0 ? (
+              <View
+                testID="video-comments-error"
+                style={[
+                  styles.commentsStateCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.commentsStateText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  {commentsError.message}
+                </Text>
+                <Pressable
+                  testID="video-comments-retry"
+                  accessibilityRole="button"
+                  accessibilityLabel="Reintentar carga de comentarios"
+                  onPress={refreshComments}
+                  style={({ pressed }) => [
+                    styles.commentsRetryButton,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.border,
+                      opacity: pressed ? 0.75 : 1,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="refresh"
+                    size={config.theme.sizes.iconSm - 2}
+                    color={colors.text}
+                  />
+                  <Text
+                    style={[styles.commentsRetryText, { color: colors.text }]}
+                  >
+                    Reintentar
+                  </Text>
+                </Pressable>
+              </View>
+            ) : comments.length === 0 ? (
+              <View
+                testID="video-comments-empty"
+                style={[
+                  styles.commentsStateCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.commentsStateText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  No hay comentarios disponibles para este vídeo.
+                </Text>
+              </View>
+            ) : (
+              <View testID="video-comments-list" style={styles.commentsList}>
+                {comments.map((comment) => {
+                  const dateLabel =
+                    formatRelativeDate(comment.publishedAt) ||
+                    comment.publishedAt;
+                  const authorInitial =
+                    comment.authorName.replace(/^@/, '').trim().charAt(0).toUpperCase() ||
+                    'U';
+                  const likesLabel = formatCompactCount(comment.likeCount);
+                  const repliesLabel = formatCompactCount(comment.replyCount);
+
+                  return (
+                    <View
+                      key={comment.id}
+                      testID={`video-comment-item-${comment.id}`}
+                      style={[
+                        styles.commentCard,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      {comment.authorAvatar ? (
+                        <Image
+                          source={{ uri: comment.authorAvatar }}
+                          style={[
+                            styles.commentAvatar,
+                            { backgroundColor: colors.surfaceElevated },
+                          ]}
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.commentAvatarFallback,
+                            { backgroundColor: colors.surfaceElevated },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.commentAvatarInitial,
+                              { color: colors.text },
+                            ]}
+                          >
+                            {authorInitial}
+                          </Text>
+                        </View>
+                      )}
+
+                      <View style={styles.commentBody}>
+                        <View style={styles.commentHeaderRow}>
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.commentAuthor,
+                              { color: colors.text },
+                            ]}
+                          >
+                            {comment.authorName}
+                          </Text>
+                          {dateLabel ? (
+                            <Text
+                              style={[
+                                styles.commentDate,
+                                { color: colors.textMuted },
+                              ]}
+                            >
+                              {dateLabel}
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        <Text
+                          style={[
+                            styles.commentText,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          {comment.text}
+                        </Text>
+
+                        {(likesLabel || repliesLabel) ? (
+                          <View style={styles.commentFooterRow}>
+                            {likesLabel ? (
+                              <View style={styles.commentMetaBadge}>
+                                <Ionicons
+                                  name="thumbs-up-outline"
+                                  size={config.theme.sizes.iconSm - 3}
+                                  color={colors.textMuted}
+                                />
+                                <Text
+                                  style={[
+                                    styles.commentMetaText,
+                                    { color: colors.textMuted },
+                                  ]}
+                                >
+                                  {likesLabel}
+                                </Text>
+                              </View>
+                            ) : null}
+
+                            {repliesLabel ? (
+                              <View style={styles.commentMetaBadge}>
+                                <Ionicons
+                                  name="chatbubble-outline"
+                                  size={config.theme.sizes.iconSm - 3}
+                                  color={colors.primary}
+                                />
+                                <Text
+                                  style={[
+                                    styles.commentMetaText,
+                                    { color: colors.primary },
+                                  ]}
+                                >
+                                  {comment.replyCount === 1
+                                    ? '1 respuesta'
+                                    : `${repliesLabel} respuestas`}
+                                </Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        ) : null}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </View>
         </ScrollView>
       )}
     </View>
@@ -422,9 +724,135 @@ const styles = StyleSheet.create({
     borderRadius: config.theme.radii.sm,
     borderWidth: config.theme.sizes.borderWidth,
     marginTop: config.theme.spacing.xs,
+    gap: config.theme.spacing.xs,
   },
   descriptionText: {
     fontSize: config.theme.typography.fontSizes.sm,
     lineHeight: config.theme.typography.lineHeights.sm,
   },
+  descriptionToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: config.theme.spacing.xxs,
+    paddingTop: config.theme.spacing.xxs,
+  },
+  descriptionToggleText: {
+    fontSize: config.theme.typography.fontSizes.sm,
+    fontWeight: config.theme.typography.fontWeights.semibold,
+  },
+  commentsSection: {
+    marginTop: config.theme.spacing.xs,
+    paddingTop: config.theme.spacing.md,
+    borderTopWidth: config.theme.sizes.borderWidth,
+    gap: config.theme.spacing.sm,
+  },
+  commentsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  commentsHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: config.theme.spacing.xs,
+  },
+  commentsHeaderTitle: {
+    fontSize: config.theme.typography.fontSizes.md,
+    fontWeight: config.theme.typography.fontWeights.bold,
+  },
+  commentsCountBadge: {
+    fontSize: config.theme.typography.fontSizes.sm,
+    fontWeight: config.theme.typography.fontWeights.medium,
+  },
+  commentsStateCard: {
+    padding: config.theme.spacing.md,
+    borderRadius: config.theme.radii.sm,
+    borderWidth: config.theme.sizes.borderWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: config.theme.spacing.sm,
+  },
+  commentsStateText: {
+    fontSize: config.theme.typography.fontSizes.sm,
+    textAlign: 'center',
+  },
+  commentsRetryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: config.theme.spacing.xs,
+    paddingHorizontal: config.theme.spacing.md,
+    paddingVertical: config.theme.spacing.xs,
+    borderRadius: config.theme.radii.full,
+    borderWidth: config.theme.sizes.borderWidth,
+  },
+  commentsRetryText: {
+    fontSize: config.theme.typography.fontSizes.xs,
+    fontWeight: config.theme.typography.fontWeights.semibold,
+  },
+  commentsList: {
+    gap: config.theme.spacing.sm,
+  },
+  commentCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: config.theme.spacing.md,
+    borderRadius: config.theme.radii.sm,
+    borderWidth: config.theme.sizes.borderWidth,
+    gap: config.theme.spacing.sm,
+  },
+  commentAvatar: {
+    width: config.theme.sizes.channelAvatarSm,
+    height: config.theme.sizes.channelAvatarSm,
+    borderRadius: config.theme.radii.full,
+  },
+  commentAvatarFallback: {
+    width: config.theme.sizes.channelAvatarSm,
+    height: config.theme.sizes.channelAvatarSm,
+    borderRadius: config.theme.radii.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commentAvatarInitial: {
+    fontSize: config.theme.typography.fontSizes.sm,
+    fontWeight: config.theme.typography.fontWeights.bold,
+  },
+  commentBody: {
+    flex: 1,
+    gap: config.theme.spacing.xxs,
+  },
+  commentHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: config.theme.spacing.xs,
+  },
+  commentAuthor: {
+    flexShrink: 1,
+    fontSize: config.theme.typography.fontSizes.xs,
+    fontWeight: config.theme.typography.fontWeights.semibold,
+  },
+  commentDate: {
+    fontSize: config.theme.typography.fontSizes.xs,
+  },
+  commentText: {
+    fontSize: config.theme.typography.fontSizes.sm,
+    lineHeight: config.theme.typography.lineHeights.sm,
+  },
+  commentFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: config.theme.spacing.md,
+    marginTop: config.theme.spacing.xxs,
+  },
+  commentMetaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  commentMetaText: {
+    fontSize: config.theme.typography.fontSizes.xs,
+    fontWeight: config.theme.typography.fontWeights.medium,
+  },
 });
+

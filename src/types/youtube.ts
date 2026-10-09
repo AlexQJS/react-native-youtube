@@ -191,3 +191,43 @@ export interface YouTubeVideosResponse {
     }>;
   };
 }
+
+export interface VideoComment {
+  id: string;
+  authorName: string;
+  authorAvatar?: string;
+  text: string;
+  publishedAt: string;
+  likeCount?: number;
+  replyCount?: number;
+}
+
+export interface YouTubeCommentThreadsResponse {
+  items?: Array<{
+    id?: string;
+    snippet?: {
+      videoId?: string;
+      totalReplyCount?: number;
+      topLevelComment?: {
+        id?: string;
+        snippet?: {
+          authorDisplayName?: string;
+          authorProfileImageUrl?: string;
+          textDisplay?: string;
+          textOriginal?: string;
+          likeCount?: number;
+          publishedAt?: string;
+        };
+      };
+    };
+  }>;
+  error?: {
+    code?: number;
+    message?: string;
+    errors?: Array<{
+      reason?: string;
+      message?: string;
+    }>;
+  };
+}
+

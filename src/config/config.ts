@@ -201,6 +201,13 @@ export const config = {
     minQueryLength: 2,
   },
 
+  comments: {
+    /** Número máximo de comentarios a mostrar dentro del reproductor de vídeo */
+    maxResults: 25,
+    /** Número de líneas visibles en la descripción cuando está reducida ("Ver más") */
+    descriptionCollapsedLines: 3,
+  },
+
   cache: {
     /** Duración de la caché del Feed en milisegundos (10 minutos) */
     feedTtlMs: 10 * 60 * 1000,
