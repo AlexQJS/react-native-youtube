@@ -56,6 +56,12 @@ export function PersistentPlayerHost({
     loading: commentsLoading,
     error: commentsError,
     refresh: refreshComments,
+    expandedReplies,
+    repliesByCommentId,
+    loadingReplies,
+    errorReplies,
+    toggleReplies,
+    retryReplies,
   } = useVideoComments(videoId || undefined);
 
   useEffect(() => {
@@ -493,6 +499,24 @@ export function PersistentPlayerHost({
                     'U';
                   const likesLabel = formatCompactCount(comment.likeCount);
                   const repliesLabel = formatCompactCount(comment.replyCount);
+                  const hasReplies = Boolean(
+                    (comment.replyCount && comment.replyCount > 0) ||
+                      (comment.replies && comment.replies.length > 0) ||
+                      comment.repliesContinuationToken
+                  );
+                  const isRepliesExpanded = Boolean(expandedReplies[comment.id]);
+                  const loadedReplies =
+                    repliesByCommentId[comment.id] ?? comment.replies ?? [];
+                  const isLoadingReplies = Boolean(loadingReplies[comment.id]);
+                  const replyError = errorReplies[comment.id] ?? null;
+
+                  const replyButtonLabel = isRepliesExpanded
+                    ? 'Ocultar respuestas'
+                    : comment.replyCount === 1
+                      ? '1 respuesta'
+                      : repliesLabel
+                        ? `${repliesLabel} respuestas`
+                        : 'Ver respuestas';
 
                   return (
                     <View
@@ -564,7 +588,7 @@ export function PersistentPlayerHost({
                           {comment.text}
                         </Text>
 
-                        {(likesLabel || repliesLabel) ? (
+                        {(likesLabel || hasReplies) ? (
                           <View style={styles.commentFooterRow}>
                             {likesLabel ? (
                               <View style={styles.commentMetaBadge}>
@@ -584,25 +608,229 @@ export function PersistentPlayerHost({
                               </View>
                             ) : null}
 
-                            {repliesLabel ? (
-                              <View style={styles.commentMetaBadge}>
+                            {hasReplies ? (
+                              <Pressable
+                                testID={`comment-replies-toggle-${comment.id}`}
+                                accessibilityRole="button"
+                                accessibilityLabel={replyButtonLabel}
+                                onPress={() => toggleReplies(comment)}
+                                hitSlop={8}
+                                style={({ pressed }) => [
+                                  styles.commentRepliesButton,
+                                  { opacity: pressed ? 0.7 : 1 },
+                                ]}
+                              >
                                 <Ionicons
                                   name="chatbubble-outline"
                                   size={config.theme.sizes.iconSm - 3}
                                   color={colors.primary}
                                 />
                                 <Text
+                                  testID={`comment-replies-toggle-text-${comment.id}`}
                                   style={[
                                     styles.commentMetaText,
                                     { color: colors.primary },
                                   ]}
                                 >
-                                  {comment.replyCount === 1
-                                    ? '1 respuesta'
-                                    : `${repliesLabel} respuestas`}
+                                  {replyButtonLabel}
+                                </Text>
+                                <Ionicons
+                                  name={
+                                    isRepliesExpanded
+                                      ? 'chevron-up'
+                                      : 'chevron-down'
+                                  }
+                                  size={config.theme.sizes.iconSm - 2}
+                                  color={colors.primary}
+                                />
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        ) : null}
+
+                        {isRepliesExpanded ? (
+                          <View
+                            testID={`comment-replies-container-${comment.id}`}
+                            style={[
+                              styles.repliesContainer,
+                              { borderLeftColor: colors.border },
+                            ]}
+                          >
+                            {isLoadingReplies && loadedReplies.length === 0 ? (
+                              <View
+                                testID={`comment-replies-loading-${comment.id}`}
+                                style={styles.repliesLoadingRow}
+                              >
+                                <ActivityIndicator
+                                  size="small"
+                                  color={colors.primary}
+                                />
+                                <Text
+                                  style={[
+                                    styles.repliesStateText,
+                                    { color: colors.textSecondary },
+                                  ]}
+                                >
+                                  Cargando respuestas...
                                 </Text>
                               </View>
-                            ) : null}
+                            ) : replyError && loadedReplies.length === 0 ? (
+                              <View
+                                testID={`comment-replies-error-${comment.id}`}
+                                style={styles.repliesErrorRow}
+                              >
+                                <Text
+                                  style={[
+                                    styles.repliesStateText,
+                                    { color: colors.textSecondary },
+                                  ]}
+                                >
+                                  {replyError}
+                                </Text>
+                                <Pressable
+                                  testID={`comment-replies-retry-${comment.id}`}
+                                  accessibilityRole="button"
+                                  onPress={() => retryReplies(comment)}
+                                  style={({ pressed }) => [
+                                    styles.commentsRetryButton,
+                                    {
+                                      backgroundColor: colors.surfaceElevated,
+                                      borderColor: colors.border,
+                                      opacity: pressed ? 0.75 : 1,
+                                    },
+                                  ]}
+                                >
+                                  <Ionicons
+                                    name="refresh"
+                                    size={config.theme.sizes.iconSm - 3}
+                                    color={colors.text}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.commentsRetryText,
+                                      { color: colors.text },
+                                    ]}
+                                  >
+                                    Reintentar
+                                  </Text>
+                                </Pressable>
+                              </View>
+                            ) : loadedReplies.length === 0 ? (
+                              <Text
+                                style={[
+                                  styles.repliesStateText,
+                                  { color: colors.textMuted },
+                                ]}
+                              >
+                                No hay respuestas disponibles.
+                              </Text>
+                            ) : (
+                              loadedReplies.map((reply) => {
+                                const replyDateLabel =
+                                  formatRelativeDate(reply.publishedAt) ||
+                                  reply.publishedAt;
+                                const replyInitial =
+                                  reply.authorName
+                                    .replace(/^@/, '')
+                                    .trim()
+                                    .charAt(0)
+                                    .toUpperCase() || 'U';
+                                const replyLikesLabel = formatCompactCount(
+                                  reply.likeCount
+                                );
+
+                                return (
+                                  <View
+                                    key={reply.id}
+                                    testID={`comment-reply-item-${reply.id}`}
+                                    style={styles.replyItemRow}
+                                  >
+                                    {reply.authorAvatar ? (
+                                      <Image
+                                        source={{ uri: reply.authorAvatar }}
+                                        style={[
+                                          styles.replyAvatar,
+                                          {
+                                            backgroundColor:
+                                              colors.surfaceElevated,
+                                          },
+                                        ]}
+                                      />
+                                    ) : (
+                                      <View
+                                        style={[
+                                          styles.replyAvatarFallback,
+                                          {
+                                            backgroundColor:
+                                              colors.surfaceElevated,
+                                          },
+                                        ]}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.replyAvatarInitial,
+                                            { color: colors.text },
+                                          ]}
+                                        >
+                                          {replyInitial}
+                                        </Text>
+                                      </View>
+                                    )}
+
+                                    <View style={styles.replyBody}>
+                                      <View style={styles.commentHeaderRow}>
+                                        <Text
+                                          numberOfLines={1}
+                                          style={[
+                                            styles.commentAuthor,
+                                            { color: colors.text },
+                                          ]}
+                                        >
+                                          {reply.authorName}
+                                        </Text>
+                                        {replyDateLabel ? (
+                                          <Text
+                                            style={[
+                                              styles.commentDate,
+                                              { color: colors.textMuted },
+                                            ]}
+                                          >
+                                            {replyDateLabel}
+                                          </Text>
+                                        ) : null}
+                                      </View>
+
+                                      <Text
+                                        style={[
+                                          styles.replyText,
+                                          { color: colors.textSecondary },
+                                        ]}
+                                      >
+                                        {reply.text}
+                                      </Text>
+
+                                      {replyLikesLabel ? (
+                                        <View style={styles.commentMetaBadge}>
+                                          <Ionicons
+                                            name="thumbs-up-outline"
+                                            size={config.theme.sizes.iconSm - 4}
+                                            color={colors.textMuted}
+                                          />
+                                          <Text
+                                            style={[
+                                              styles.commentMetaText,
+                                              { color: colors.textMuted },
+                                            ]}
+                                          >
+                                            {replyLikesLabel}
+                                          </Text>
+                                        </View>
+                                      ) : null}
+                                    </View>
+                                  </View>
+                                );
+                              })
+                            )}
                           </View>
                         ) : null}
                       </View>
@@ -850,9 +1078,65 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  commentRepliesButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 2,
+  },
   commentMetaText: {
     fontSize: config.theme.typography.fontSizes.xs,
     fontWeight: config.theme.typography.fontWeights.medium,
   },
+  repliesContainer: {
+    marginTop: config.theme.spacing.sm,
+    paddingLeft: config.theme.spacing.md,
+    borderLeftWidth: 2,
+    gap: config.theme.spacing.sm,
+  },
+  repliesLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: config.theme.spacing.xs,
+    paddingVertical: config.theme.spacing.xxs,
+  },
+  repliesErrorRow: {
+    alignItems: 'flex-start',
+    gap: config.theme.spacing.xs,
+    paddingVertical: config.theme.spacing.xxs,
+  },
+  repliesStateText: {
+    fontSize: config.theme.typography.fontSizes.xs,
+  },
+  replyItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: config.theme.spacing.xs,
+  },
+  replyAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: config.theme.radii.full,
+  },
+  replyAvatarFallback: {
+    width: 24,
+    height: 24,
+    borderRadius: config.theme.radii.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  replyAvatarInitial: {
+    fontSize: config.theme.typography.fontSizes.xs,
+    fontWeight: config.theme.typography.fontWeights.bold,
+  },
+  replyBody: {
+    flex: 1,
+    gap: 2,
+  },
+  replyText: {
+    fontSize: config.theme.typography.fontSizes.xs + 1,
+    lineHeight: config.theme.typography.lineHeights.xs + 2,
+  },
 });
+
 

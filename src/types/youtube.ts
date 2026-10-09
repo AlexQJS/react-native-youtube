@@ -200,6 +200,10 @@ export interface VideoComment {
   publishedAt: string;
   likeCount?: number;
   replyCount?: number;
+  /** Respuestas precargadas o cargadas bajo demanda para este comentario */
+  replies?: VideoComment[];
+  /** Token de continuación de InnerTube para desplegar respuestas sin API key */
+  repliesContinuationToken?: string;
 }
 
 export interface YouTubeCommentThreadsResponse {
@@ -220,6 +224,20 @@ export interface YouTubeCommentThreadsResponse {
         };
       };
     };
+    replies?: {
+      comments?: Array<{
+        id?: string;
+        snippet?: {
+          parentId?: string;
+          authorDisplayName?: string;
+          authorProfileImageUrl?: string;
+          textDisplay?: string;
+          textOriginal?: string;
+          likeCount?: number;
+          publishedAt?: string;
+        };
+      }>;
+    };
   }>;
   error?: {
     code?: number;
@@ -231,3 +249,25 @@ export interface YouTubeCommentThreadsResponse {
   };
 }
 
+export interface YouTubeCommentsListResponse {
+  items?: Array<{
+    id?: string;
+    snippet?: {
+      parentId?: string;
+      authorDisplayName?: string;
+      authorProfileImageUrl?: string;
+      textDisplay?: string;
+      textOriginal?: string;
+      likeCount?: number;
+      publishedAt?: string;
+    };
+  }>;
+  error?: {
+    code?: number;
+    message?: string;
+    errors?: Array<{
+      reason?: string;
+      message?: string;
+    }>;
+  };
+}

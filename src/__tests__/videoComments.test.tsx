@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { PersistentPlayerHost } from '../components/PersistentPlayerHost';
 import { config } from '../config/config';
 import { PlayerProvider, usePlayer } from '../context/PlayerContext';
@@ -39,7 +39,7 @@ function TestPlayerLauncher({ video }: { video: VideoItem }) {
   return <PersistentPlayerHost />;
 }
 
-describe('Comentarios y Descripción Reducida ("Ver más" / "Ver menos") en el Vídeo', () => {
+describe('Comentarios, Respuestas y Descripción Reducida ("Ver más" / "Ver menos") en el Vídeo', () => {
   beforeEach(async () => {
     storage.resetMemoryCache();
     clearCommentsMemoryCache();
@@ -87,7 +87,7 @@ describe('Comentarios y Descripción Reducida ("Ver más" / "Ver menos") en el V
     });
   });
 
-  it('obtiene comentarios sin API key mediante el endpoint público InnerTube (/youtubei/v1/next)', async () => {
+  it('obtiene comentarios y el token de sus respuestas sin API key mediante InnerTube (/youtubei/v1/next)', async () => {
     global.fetch = jest
       .fn()
       // 1ª petición: metadatos del vídeo + token de continuación de comentarios
@@ -123,7 +123,7 @@ describe('Comentarios y Descripción Reducida ("Ver más" / "Ver menos") en el V
           },
         }),
       })
-      // 2ª petición: listado de comentarios con formato moderno (commentEntityPayload)
+      // 2ª petición: listado de comentarios con formato moderno (commentEntityPayload) y token de respuestas
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -137,6 +137,21 @@ describe('Comentarios y Descripción Reducida ("Ver más" / "Ver menos") en el V
                       commentViewModel: {
                         commentViewModel: {
                           commentId: 'c_innertube_1',
+                        },
+                      },
+                      replies: {
+                        commentRepliesRenderer: {
+                          contents: [
+                            {
+                              continuationItemRenderer: {
+                                continuationEndpoint: {
+                                  continuationCommand: {
+                                    token: 'mock_reply_token_1',
+                                  },
+                                },
+                              },
+                            },
+                          ],
                         },
                       },
                     },
@@ -175,6 +190,55 @@ describe('Comentarios y Descripción Reducida ("Ver más" / "Ver menos") en el V
             },
           },
         }),
+      })
+      // 3ª petición: respuestas del comentario usando el token de continuación de respuestas
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          onResponseReceivedEndpoints: [
+            {
+              appendContinuationItemsAction: {
+                continuationItems: [
+                  {
+                    commentViewModel: {
+                      commentViewModel: {
+                        commentId: 'reply_innertube_1',
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+          frameworkUpdates: {
+            entityBatchUpdate: {
+              mutations: [
+                {
+                  entityKey: 'key_reply_1',
+                  payload: {
+                    commentEntityPayload: {
+                      properties: {
+                        commentId: 'reply_innertube_1',
+                        content: {
+                          content: 'Totalmente de acuerdo contigo, Laura.',
+                        },
+                        publishedTime: 'hace 1 hora',
+                        replyLevel: 1,
+                      },
+                      author: {
+                        displayName: '@pedro_js',
+                      },
+                      toolbar: {
+                        likeCountNotliked: '7',
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        }),
       }) as unknown as typeof fetch;
 
     const comments = await youtubeService.getVideoComments('vid_nokey_1', '');
@@ -187,10 +251,21 @@ describe('Comentarios y Descripción Reducida ("Ver más" / "Ver menos") en el V
       publishedAt: 'hace 3 horas',
       likeCount: 45,
       replyCount: 2,
+      repliesContinuationToken: 'mock_reply_token_1',
+    });
+
+    const replies = await youtubeService.getCommentReplies(comments[0], '');
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toEqual({
+      id: 'reply_innertube_1',
+      authorName: '@pedro_js',
+      text: 'Totalmente de acuerdo contigo, Laura.',
+      publishedAt: 'hace 1 hora',
+      likeCount: 7,
     });
   });
 
-  it('muestra la descripción reducida por defecto con botón "Ver más" / "Ver menos" y debajo los comentarios', async () => {
+  it('muestra la descripción reducida ("Ver más" / "Ver menos"), los comentarios debajo y permite desplegar/ocultar las respuestas de cada comentario', async () => {
     jest.spyOn(youtubeService, 'getVideoComments').mockResolvedValue([
       {
         id: 'comm_ui_1',
@@ -198,7 +273,8 @@ describe('Comentarios y Descripción Reducida ("Ver más" / "Ver menos") en el V
         text: 'Primer comentario debajo de la descripción',
         publishedAt: 'hace 1 día',
         likeCount: 18,
-        replyCount: 1,
+        replyCount: 2,
+        repliesContinuationToken: 'token_replies_comm_1',
       },
       {
         id: 'comm_ui_2',
@@ -207,6 +283,24 @@ describe('Comentarios y Descripción Reducida ("Ver más" / "Ver menos") en el V
         publishedAt: 'hace 5 horas',
       },
     ]);
+
+    const getRepliesSpy = jest
+      .spyOn(youtubeService, 'getCommentReplies')
+      .mockResolvedValue([
+        {
+          id: 'rep_ui_1',
+          authorName: '@creador_canal',
+          text: '¡Muchas gracias por ver el vídeo!',
+          publishedAt: 'hace 12 horas',
+          likeCount: 5,
+        },
+        {
+          id: 'rep_ui_2',
+          authorName: '@otro_usuario',
+          text: 'A mí también me funcionó a la primera.',
+          publishedAt: 'hace 3 horas',
+        },
+      ]);
 
     const sampleVideo: VideoItem = {
       id: 'vid_player_ui',
@@ -220,7 +314,7 @@ describe('Comentarios y Descripción Reducida ("Ver más" / "Ver menos") en el V
       viewCount: 15400,
     };
 
-    const { getByTestId, getByText } = render(
+    const { getByTestId, getByText, queryByTestId } = render(
       <PlayerProvider>
         <TestPlayerLauncher video={sampleVideo} />
       </PlayerProvider>
@@ -262,8 +356,38 @@ describe('Comentarios y Descripción Reducida ("Ver más" / "Ver menos") en el V
     expect(getByTestId('video-comment-item-comm_ui_2')).toBeTruthy();
     expect(getByText('@dev_fan')).toBeTruthy();
     expect(getByText('Primer comentario debajo de la descripción')).toBeTruthy();
-    expect(getByText('1 respuesta')).toBeTruthy();
-    expect(getByText('@ana_ux')).toBeTruthy();
-    expect(getByText('Me encanta el nuevo diseño compacto')).toBeTruthy();
+
+    // El primer comentario tiene 2 respuestas (inicialmente contraídas) y el segundo no tiene botón de respuestas
+    const repliesToggleBtn = getByTestId('comment-replies-toggle-comm_ui_1');
+    expect(getByTestId('comment-replies-toggle-text-comm_ui_1').props.children).toBe(
+      '2 respuestas'
+    );
+    expect(queryByTestId('comment-replies-toggle-comm_ui_2')).toBeNull();
+    expect(queryByTestId('comment-replies-container-comm_ui_1')).toBeNull();
+
+    // Al pulsar en "2 respuestas", se despliegan las respuestas del comentario
+    fireEvent.press(repliesToggleBtn);
+
+    await waitFor(() => {
+      expect(getByTestId('comment-replies-container-comm_ui_1')).toBeTruthy();
+      expect(getByTestId('comment-reply-item-rep_ui_1')).toBeTruthy();
+      expect(getByTestId('comment-reply-item-rep_ui_2')).toBeTruthy();
+    });
+
+    expect(getRepliesSpy).toHaveBeenCalledTimes(1);
+    expect(getByText('@creador_canal')).toBeTruthy();
+    expect(getByText('¡Muchas gracias por ver el vídeo!')).toBeTruthy();
+    expect(getByText('@otro_usuario')).toBeTruthy();
+    expect(getByText('A mí también me funcionó a la primera.')).toBeTruthy();
+    expect(getByTestId('comment-replies-toggle-text-comm_ui_1').props.children).toBe(
+      'Ocultar respuestas'
+    );
+
+    // Al pulsar en "Ocultar respuestas", se pliegan las respuestas
+    fireEvent.press(repliesToggleBtn);
+    expect(queryByTestId('comment-replies-container-comm_ui_1')).toBeNull();
+    expect(getByTestId('comment-replies-toggle-text-comm_ui_1').props.children).toBe(
+      '2 respuestas'
+    );
   });
 });

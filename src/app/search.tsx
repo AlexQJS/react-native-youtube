@@ -158,7 +158,7 @@ export default function SearchScreen() {
           renderItem={renderChannelItem}
           ListHeaderComponent={
             favorites.length > 0 ? (
-              <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
+              <Text style={[styles.sectionHeader, { color: colors.textSecondary, marginTop: 8, marginBottom: 16 }]}>
                 Tus canales favoritos ({favorites.length})
               </Text>
             ) : null
@@ -301,35 +301,7 @@ export default function SearchScreen() {
             </Pressable>
           </View>
 
-          {/* Apartado 1: Canales */}
-          {showChannelsSection && (
-            <View
-              testID="search-channels-section"
-              style={styles.sectionBlock}
-            >
-              <View style={styles.sectionHeaderRow}>
-                <Ionicons
-                  name="people"
-                  size={config.theme.sizes.iconSm}
-                  color={colors.primary}
-                />
-                <Text style={[styles.sectionHeader, { color: colors.text }]}>
-                  Canales ({results.length})
-                </Text>
-              </View>
-
-              {results.map((channel) => (
-                <ChannelCard
-                  key={channel.id}
-                  channel={channel}
-                  isFavorite={isFavorite(channel.id)}
-                  onToggleFavorite={handleToggleFavorite}
-                />
-              ))}
-            </View>
-          )}
-
-          {/* Apartado 2: Vídeos */}
+          {/* Apartado 1: Vídeos */}
           {showVideosSection && (
             <View
               testID="search-videos-section"
@@ -352,6 +324,34 @@ export default function SearchScreen() {
                   video={video}
                   progress={getProgress(video.id)}
                   onPress={handleOpenVideo}
+                />
+              ))}
+            </View>
+          )}
+
+          {/* Apartado 2: Canales */}
+          {showChannelsSection && (
+            <View
+              testID="search-channels-section"
+              style={styles.sectionBlock}
+            >
+              <View style={styles.sectionHeaderRow}>
+                <Ionicons
+                  name="people"
+                  size={config.theme.sizes.iconSm}
+                  color={colors.primary}
+                />
+                <Text style={[styles.sectionHeader, { color: colors.text }]}>
+                  Canales ({results.length})
+                </Text>
+              </View>
+
+              {results.map((channel) => (
+                <ChannelCard
+                  key={channel.id}
+                  channel={channel}
+                  isFavorite={isFavorite(channel.id)}
+                  onToggleFavorite={handleToggleFavorite}
                 />
               ))}
             </View>
