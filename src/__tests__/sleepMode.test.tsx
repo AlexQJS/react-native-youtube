@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { deactivateKeepAwake } from 'expo-keep-awake';
 import {
+  buildYouTubeIframeHtml,
   VIDEO_PLAYER_KEEP_AWAKE_TAG,
   VideoPlayer,
 } from '../components/VideoPlayer';
@@ -283,5 +284,27 @@ describe('Sleep Mode en VideoPlayer', () => {
       { id: '2h', label: '2 h', durationSeconds: 7200 },
       { id: 'end_of_video', label: 'Hasta que termine el vídeo', durationSeconds: null },
     ]);
+  });
+
+  it('configura el iframe de YouTube y el WebView para reproducirse automáticamente al abrir el vídeo', () => {
+    const html = buildYouTubeIframeHtml('abc123XYZ', 30);
+    expect(html).toContain('autoplay: 1');
+    expect(html).toContain('start: 30');
+    expect(html).toContain("iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture')");
+    expect(html).toContain('event.target.playVideo()');
+
+    const { getByTestId } = render(
+      <VideoPlayer
+        videoId="abc123XYZ"
+        title="Vídeo autoplay"
+        onProgressUpdate={mockOnProgressUpdate}
+        onFlushProgress={mockOnFlushProgress}
+        onRestartProgress={mockOnRestartProgress}
+      />
+    );
+
+    const webview = getByTestId('mock-webview');
+    expect(webview.props.mediaPlaybackRequiresUserAction).toBe(false);
+    expect(webview.props.allowsInlineMediaPlayback).toBe(true);
   });
 });

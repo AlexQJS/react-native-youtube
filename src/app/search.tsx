@@ -196,7 +196,7 @@ export default function SearchScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Filtros rápidos: Todo | Vídeos | Canales */}
+          {/* Filtros rápidos: Todo | Canales | Videos */}
           <View style={styles.filterPillsRow}>
             <Pressable
               testID="search-filter-all"
@@ -223,41 +223,6 @@ export default function SearchScreen() {
                 ]}
               >
                 Todo
-              </Text>
-            </Pressable>
-
-            <Pressable
-              testID="search-filter-videos"
-              onPress={() => setActiveFilter('videos')}
-              style={[
-                styles.filterPill,
-                {
-                  backgroundColor:
-                    activeFilter === 'videos'
-                      ? colors.primary
-                      : colors.surfaceElevated,
-                  borderColor:
-                    activeFilter === 'videos' ? colors.primary : colors.border,
-                },
-              ]}
-            >
-              <Ionicons
-                name="play-circle-outline"
-                size={config.theme.sizes.iconSm - 2}
-                color={
-                  activeFilter === 'videos' ? colors.badgeText : colors.textSecondary
-                }
-              />
-              <Text
-                style={[
-                  styles.filterPillText,
-                  {
-                    color:
-                      activeFilter === 'videos' ? colors.badgeText : colors.text,
-                  },
-                ]}
-              >
-                Vídeos ({videoResults.length})
               </Text>
             </Pressable>
 
@@ -299,6 +264,42 @@ export default function SearchScreen() {
                 Canales ({results.length})
               </Text>
             </Pressable>
+
+            <Pressable
+              testID="search-filter-videos"
+              onPress={() => setActiveFilter('videos')}
+              style={[
+                styles.filterPill,
+                {
+                  backgroundColor:
+                    activeFilter === 'videos'
+                      ? colors.primary
+                      : colors.surfaceElevated,
+                  borderColor:
+                    activeFilter === 'videos' ? colors.primary : colors.border,
+                },
+              ]}
+            >
+              <Ionicons
+                name="play-circle-outline"
+                size={config.theme.sizes.iconSm - 2}
+                color={
+                  activeFilter === 'videos' ? colors.badgeText : colors.textSecondary
+                }
+              />
+              <Text
+                style={[
+                  styles.filterPillText,
+                  {
+                    color:
+                      activeFilter === 'videos' ? colors.badgeText : colors.text,
+                  },
+                ]}
+              >
+                Vídeos ({videoResults.length})
+              </Text>
+            </Pressable>
+
           </View>
 
           {/* Apartado 1: Vídeos */}

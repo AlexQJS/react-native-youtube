@@ -148,6 +148,7 @@ export function buildYouTubeIframeHtml(videoId: string, startSeconds: number): s
         host: '${config.api.embedHost}',
         videoId: '${safeVideoId}',
         playerVars: {
+          autoplay: 1,
           playsinline: 1,
           controls: 1,
           rel: 0,
@@ -157,12 +158,19 @@ export function buildYouTubeIframeHtml(videoId: string, startSeconds: number): s
         },
         events: {
           onReady: function(event) {
+            var iframe = event.target && event.target.getIframe ? event.target.getIframe() : null;
+            if (iframe && iframe.setAttribute) {
+              iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
+            }
             var duration = event.target.getDuration ? event.target.getDuration() : 0;
             postToNative({
               type: 'READY',
               position: ${safeStart},
               duration: duration || 0
             });
+            if (event.target && typeof event.target.playVideo === 'function') {
+              event.target.playVideo();
+            }
           },
           onStateChange: function(event) {
             var state = event.data;
@@ -587,48 +595,74 @@ export function VideoPlayer({
                 pointerEvents="box-none"
               >
                 <Pressable
-                  testID="mini-player-toggle-play"
+                  testID="mini-player-expand"
                   accessibilityRole="button"
-                  accessibilityLabel={isPlaying ? 'Pausar' : 'Reproducir'}
-                  onPress={togglePlayPause}
+                  accessibilityLabel={`Ampliar ${title}`}
+                  onPress={onExpand}
                   hitSlop={10}
                   style={({ pressed }) => [
-                    styles.miniPlayPauseButton,
+                    styles.miniRoundButton,
                     {
-                      backgroundColor: colors.primary,
-                      opacity: pressed ? 0.85 : 1,
+                      backgroundColor: colors.badgeBackground,
+                      opacity: pressed ? 0.75 : 1,
                     },
                   ]}
                 >
                   <Ionicons
-                    name={isPlaying ? 'pause' : 'play'}
-                    size={config.theme.sizes.iconMd + 2}
+                    name="expand-outline"
+                    size={config.theme.sizes.iconMd - 2}
                     color={colors.badgeText}
                   />
                 </Pressable>
 
-                {onClose && (
+                <View
+                  style={styles.miniActionButtons}
+                  pointerEvents="box-none"
+                >
                   <Pressable
-                    testID="mini-player-close"
+                    testID="mini-player-toggle-play"
                     accessibilityRole="button"
-                    accessibilityLabel="Cerrar reproductor"
-                    onPress={onClose}
+                    accessibilityLabel={isPlaying ? 'Pausar' : 'Reproducir'}
+                    onPress={togglePlayPause}
                     hitSlop={10}
                     style={({ pressed }) => [
-                      styles.miniRoundButton,
+                      styles.miniPlayPauseButton,
                       {
-                        backgroundColor: colors.badgeBackground,
-                        opacity: pressed ? 0.75 : 1,
+                        backgroundColor: colors.primary,
+                        opacity: pressed ? 0.85 : 1,
                       },
                     ]}
                   >
                     <Ionicons
-                      name="close"
-                      size={config.theme.sizes.iconMd}
+                      name={isPlaying ? 'pause' : 'play'}
+                      size={config.theme.sizes.iconMd + 2}
                       color={colors.badgeText}
                     />
                   </Pressable>
-                )}
+
+                  {onClose && (
+                    <Pressable
+                      testID="mini-player-close"
+                      accessibilityRole="button"
+                      accessibilityLabel="Cerrar reproductor"
+                      onPress={onClose}
+                      hitSlop={10}
+                      style={({ pressed }) => [
+                        styles.miniRoundButton,
+                        {
+                          backgroundColor: colors.badgeBackground,
+                          opacity: pressed ? 0.75 : 1,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="close"
+                        size={config.theme.sizes.iconMd}
+                        color={colors.badgeText}
+                      />
+                    </Pressable>
+                  )}
+                </View>
               </View>
             )}
           </>
@@ -664,36 +698,12 @@ export function VideoPlayer({
           </View>
 
           <View style={styles.miniControlsRow}>
-            <Pressable
-              testID="mini-player-expand"
-              accessibilityRole="button"
-              accessibilityLabel={`Ampliar ${title}`}
-              onPress={onExpand}
-              hitSlop={8}
-              style={({ pressed }) => [
-                styles.miniExpandButton,
-                { opacity: pressed ? 0.75 : 1 },
-              ]}
+            <Text
+              numberOfLines={1}
+              style={[styles.miniTitle, { color: colors.text }]}
             >
-              <View
-                style={[
-                  styles.miniRoundButton,
-                  { backgroundColor: colors.surfaceElevated },
-                ]}
-              >
-                <Ionicons
-                  name="expand-outline"
-                  size={config.theme.sizes.iconMd - 2}
-                  color={colors.text}
-                />
-              </View>
-              <Text
-                numberOfLines={1}
-                style={[styles.miniTitle, { color: colors.text }]}
-              >
-                {title}
-              </Text>
-            </Pressable>
+              {title}
+            </Text>
           </View>
 
           {isSleepActive && (
@@ -1051,9 +1061,11 @@ const styles = StyleSheet.create({
   miniVideoOverlayButtons: {
     position: 'absolute',
     top: config.theme.spacing.xs,
+    left: config.theme.spacing.xs,
     right: config.theme.spacing.xs,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: config.theme.spacing.xs,
     zIndex: 10,
   },
