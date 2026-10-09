@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#32c5fa"
+      "backgroundColor": "#39b19b"
     },
     "ios": {
       "supportsTablet": true,
@@ -21,7 +21,7 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "monochromeImage": "./assets/monochrome-icon.png",
-        "backgroundColor": "#32c5fa"
+        "backgroundColor": "#39b19b"
       },
       "package": "com.youtubefeed.app"
     },

@@ -61,7 +61,7 @@ export const config = {
   splash: {
     brandName: 'Video Feed',
     tagline: 'Tus canales favoritos de YouTube',
-    backgroundColor: '#32c5fa',
+    backgroundColor: '#39b19bff',
     accentColor: '#FFFFFF',
     textColor: '#FFFFFF',
     logoSize: 136,

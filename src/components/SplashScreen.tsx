@@ -17,7 +17,7 @@ interface SplashScreenProps {
 
 /**
  * Pantalla de carga inicial (Splash Screen) basada en los iconos de la app:
- * fondo azul celeste (#32c5fa) e icono blanco de reproducción redondeado,
+ * fondo turquesa (#39b19bff) e icono blanco de reproducción redondeado,
  * con animación de entrada, pulso suave y transición fluida hacia el Feed.
  */
 export function SplashScreen({ onFinish }: SplashScreenProps) {
@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
     backgroundColor: config.splash.backgroundColor,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#023c69',
+    shadowColor: '#144d43',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.22,
     shadowRadius: 16,
