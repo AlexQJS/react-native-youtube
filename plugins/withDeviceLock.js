@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   withAndroidManifest,
+  withAppBuildGradle,
   withMainApplication,
   withMainActivity,
   withDangerousMod,
@@ -195,6 +196,7 @@ class BackgroundPlaybackService : Service() {
 
 const DEVICE_LOCK_MODULE_KT = `package com.youtubefeed.app
 
+import android.annotation.SuppressLint
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -212,6 +214,8 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.UiThreadUtil
 import com.facebook.react.module.annotations.ReactModule
+import java.util.Collections
+import java.util.WeakHashMap
 
 @ReactModule(name = DeviceLockModule.NAME)
 class DeviceLockModule(reactContext: ReactApplicationContext) :
@@ -219,7 +223,8 @@ class DeviceLockModule(reactContext: ReactApplicationContext) :
 
   companion object {
     const val NAME = "DeviceLockModule"
-    private const val WEBVIEW_HOOK_TAG_KEY = 0x7f0b9901
+    private val hookedWebViews: MutableSet<WebView> =
+      Collections.newSetFromMap(WeakHashMap())
 
     @Volatile
     var lockScreenPlaybackEnabled: Boolean = false
@@ -269,11 +274,12 @@ class DeviceLockModule(reactContext: ReactApplicationContext) :
       })();
     """.trimIndent()
 
+    @SuppressLint("RequiresFeature")
     fun configureWebViewsRecursive(view: View?) {
       if (view == null) return
       if (view is WebView) {
         try {
-          if (view.getTag(WEBVIEW_HOOK_TAG_KEY) != true) {
+          if (!hookedWebViews.contains(view)) {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
               WebViewCompat.addDocumentStartJavaScript(
                 view,
@@ -281,7 +287,7 @@ class DeviceLockModule(reactContext: ReactApplicationContext) :
                 setOf("*")
               )
             }
-            view.setTag(WEBVIEW_HOOK_TAG_KEY, true)
+            hookedWebViews.add(view)
           }
           if (lockScreenPlaybackEnabled) {
             view.onResume()
@@ -703,9 +709,24 @@ function withDeviceLockMainActivity(config) {
   });
 }
 
+function withDeviceLockAppBuildGradle(config) {
+  return withAppBuildGradle(config, (modConfig) => {
+    let contents = modConfig.modResults.contents;
+    if (!contents.includes('androidx.webkit:webkit')) {
+      contents = contents.replace(
+        /implementation\(["']com\.facebook\.react:react-android["']\)/,
+        'implementation("com.facebook.react:react-android")\n    implementation("androidx.webkit:webkit:1.14.0")'
+      );
+      modConfig.modResults.contents = contents;
+    }
+    return modConfig;
+  });
+}
+
 module.exports = function withDeviceLock(config) {
   config = withDeviceLockFiles(config);
   config = withDeviceLockManifest(config);
+  config = withDeviceLockAppBuildGradle(config);
   config = withDeviceLockMainApplication(config);
   config = withDeviceLockMainActivity(config);
   return config;
