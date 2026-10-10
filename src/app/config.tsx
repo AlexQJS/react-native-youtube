@@ -9,6 +9,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { config } from '../config/config';
 import { usePlayer } from '../context/PlayerContext';
+import { useLockScreenPlayback } from '../hooks/useLockScreenPlayback';
 import { useThemeColors } from '../hooks/useThemeColors';
 import { useWatchHistory } from '../hooks/useWatchHistory';
 import {
@@ -19,6 +20,10 @@ import {
 
 export default function ConfigScreen() {
   const { colors, isDark, themeMode, setThemeMode } = useThemeColors();
+  const {
+    isLockScreenPlaybackEnabled,
+    toggleLockScreenPlayback,
+  } = useLockScreenPlayback();
   const { activeVideo, isMinimized } = usePlayer();
   const { history } = useWatchHistory();
 
@@ -165,7 +170,101 @@ export default function ConfigScreen() {
         </View>
       </View>
 
-      {/* Sección 2: Estadísticas de tiempo visto esta semana */}
+      {/* Sección 2: Reproducción con pantalla bloqueada */}
+      <View testID="config-playback-section" style={styles.section}>
+        <View style={styles.sectionHeaderRow}>
+          <Ionicons
+            name="play-circle-outline"
+            size={config.theme.sizes.iconSm + 2}
+            color={colors.primary}
+          />
+          <Text style={[styles.sectionHeaderTitle, { color: colors.text }]}>
+            Reproducción
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <View style={styles.toggleRow}>
+            <View
+              style={[
+                styles.themeIconBadge,
+                { backgroundColor: colors.surfaceElevated },
+              ]}
+            >
+              <Ionicons
+                name={
+                  isLockScreenPlaybackEnabled
+                    ? 'lock-open-outline'
+                    : 'lock-closed-outline'
+                }
+                size={config.theme.sizes.iconMd}
+                color={colors.primary}
+              />
+            </View>
+
+            <View style={styles.themeTextColumn}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>
+                Reproducir con pantalla bloqueada
+              </Text>
+              <Text
+                testID="config-lock-screen-playback-label"
+                style={[styles.cardSubtitle, { color: colors.textSecondary }]}
+              >
+                {isLockScreenPlaybackEnabled
+                  ? 'Activo: el vídeo seguirá reproduciéndose al bloquear el móvil'
+                  : 'Inactivo: el vídeo se pausará al bloquear la pantalla'}
+              </Text>
+            </View>
+
+            <Pressable
+              testID="lock-screen-playback-toggle"
+              accessibilityRole="switch"
+              accessibilityState={{ checked: isLockScreenPlaybackEnabled }}
+              accessibilityLabel="Seguir reproduciendo vídeo con la pantalla bloqueada"
+              onPress={() => {
+                void toggleLockScreenPlayback();
+              }}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.toggleTrack,
+                {
+                  backgroundColor: isLockScreenPlaybackEnabled
+                    ? colors.primary
+                    : colors.surfaceElevated,
+                  borderColor: isLockScreenPlaybackEnabled
+                    ? colors.primary
+                    : colors.border,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.toggleThumb,
+                  {
+                    backgroundColor: isLockScreenPlaybackEnabled
+                      ? colors.badgeText
+                      : colors.textSecondary,
+                    alignSelf: isLockScreenPlaybackEnabled
+                      ? 'flex-end'
+                      : 'flex-start',
+                  },
+                ]}
+              />
+            </Pressable>
+          </View>
+        </View>
+      </View>
+
+      {/* Sección 3: Estadísticas de tiempo visto esta semana */}
       <View testID="config-weekly-stats-section" style={styles.section}>
         <View style={styles.sectionHeaderRow}>
           <Ionicons
@@ -398,6 +497,24 @@ const styles = StyleSheet.create({
   themeOptionText: {
     fontSize: config.theme.typography.fontSizes.sm,
     fontWeight: config.theme.typography.fontWeights.semibold,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: config.theme.spacing.md,
+  },
+  toggleTrack: {
+    width: 52,
+    height: 30,
+    borderRadius: config.theme.radii.full,
+    borderWidth: config.theme.sizes.borderWidth,
+    paddingHorizontal: 3,
+    justifyContent: 'center',
+  },
+  toggleThumb: {
+    width: 22,
+    height: 22,
+    borderRadius: config.theme.radii.full,
   },
   kpiRow: {
     flexDirection: 'row',

@@ -41,4 +41,29 @@ describe('SplashScreen Component', () => {
     expect(onFinish).toHaveBeenCalledTimes(1);
     unmount();
   });
+
+  it('mantiene congelada la pantalla de inicio mientras isReady es false y la oculta al pasar a true', () => {
+    const onFinish = jest.fn();
+    const { rerender, unmount } = render(
+      <SplashScreen isReady={false} onFinish={onFinish} />
+    );
+
+    act(() => {
+      jest.advanceTimersByTime(
+        config.splash.durationMs + config.splash.fadeOutDurationMs + 500
+      );
+    });
+
+    // No debe ocultarse hasta que isReady sea true
+    expect(onFinish).not.toHaveBeenCalled();
+
+    rerender(<SplashScreen isReady={true} onFinish={onFinish} />);
+
+    act(() => {
+      jest.advanceTimersByTime(config.splash.fadeOutDurationMs + 100);
+    });
+
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    unmount();
+  });
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
@@ -10,9 +10,11 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { config } from '../config/config';
 
-interface SplashScreenProps {
+export interface SplashScreenProps {
   /** Callback ejecutado cuando finaliza la animación de salida de la Splash Screen */
   onFinish: () => void;
+  /** Indica si la pantalla de inicio y los datos iniciales ya están listos para mostrarse */
+  isReady?: boolean;
 }
 
 /**
@@ -20,7 +22,10 @@ interface SplashScreenProps {
  * fondo turquesa (#39b19bff) e icono blanco de reproducción redondeado,
  * con animación de entrada, pulso suave y transición fluida hacia el Feed.
  */
-export function SplashScreen({ onFinish }: SplashScreenProps) {
+export function SplashScreen({ onFinish, isReady = true }: SplashScreenProps) {
+  const [minDurationElapsed, setMinDurationElapsed] = useState(false);
+  const hasStartedExitRef = useRef(false);
+
   const containerOpacity = useRef(new Animated.Value(1)).current;
   const logoScale = useRef(new Animated.Value(0.82)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
@@ -80,46 +85,56 @@ export function SplashScreen({ onFinish }: SplashScreenProps) {
 
     entranceAnimation.start();
 
-    let exitAnimation: Animated.CompositeAnimation | null = null;
-
-    const exitTimer = setTimeout(() => {
-      exitAnimation = Animated.parallel([
-        Animated.timing(containerOpacity, {
-          toValue: 0,
-          duration: config.splash.fadeOutDurationMs,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(logoScale, {
-          toValue: 1.08,
-          duration: config.splash.fadeOutDurationMs,
-          easing: Easing.in(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]);
-      exitAnimation.start(({ finished }) => {
-        if (finished) {
-          onFinish();
-        }
-      });
+    const durationTimer = setTimeout(() => {
+      setMinDurationElapsed(true);
     }, config.splash.durationMs);
 
     return () => {
-      clearTimeout(exitTimer);
+      clearTimeout(durationTimer);
       entranceAnimation.stop();
-      exitAnimation?.stop();
     };
   }, [
-    containerOpacity,
     logoOpacity,
     logoScale,
-    onFinish,
     progressWidth,
     ringOpacity,
     ringScale,
     textOpacity,
     textTranslateY,
   ]);
+
+  useEffect(() => {
+    if (!minDurationElapsed || !isReady || hasStartedExitRef.current) {
+      return;
+    }
+
+    hasStartedExitRef.current = true;
+
+    const exitAnimation = Animated.parallel([
+      Animated.timing(containerOpacity, {
+        toValue: 0,
+        duration: config.splash.fadeOutDurationMs,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(logoScale, {
+        toValue: 1.08,
+        duration: config.splash.fadeOutDurationMs,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]);
+
+    exitAnimation.start(({ finished }) => {
+      if (finished) {
+        onFinish();
+      }
+    });
+
+    return () => {
+      exitAnimation.stop();
+    };
+  }, [containerOpacity, isReady, logoScale, minDurationElapsed, onFinish]);
 
   return (
     <Animated.View

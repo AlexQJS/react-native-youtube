@@ -147,6 +147,8 @@ export const config = {
   },
 
   playback: {
+    /** Permite por defecto seguir reproduciendo el vídeo con la pantalla bloqueada */
+    defaultLockScreenPlayback: false,
     /** Intervalo en segundos para guardar el progreso periódicamente */
     progressSaveInterval: 10,
     /** Segundos mínimos reproducidos para considerar que un vídeo ha comenzado */
@@ -236,6 +238,7 @@ export const config = {
     videoDetailsCache: '@yt_feed/videoDetailsCache_v3',
     customApiKey: '@yt_feed/customApiKey',
     themeMode: '@yt_feed/themeMode',
+    lockScreenPlayback: '@yt_feed/lockScreenPlayback',
   },
 };
 

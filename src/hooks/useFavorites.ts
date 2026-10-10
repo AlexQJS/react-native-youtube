@@ -14,8 +14,12 @@ export interface UseFavoritesReturn {
 }
 
 export function useFavorites(): UseFavoritesReturn {
-  const [favorites, setFavorites] = useState<FavoriteChannel[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [favorites, setFavorites] = useState<FavoriteChannel[]>(
+    () => storage.getSyncFavorites() ?? []
+  );
+  const [loading, setLoading] = useState<boolean>(
+    () => !storage.isFavoritesLoaded()
+  );
   const [error, setError] = useState<string | null>(null);
 
   const loadFavorites = useCallback(async () => {

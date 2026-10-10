@@ -7,6 +7,8 @@ interface NativeDeviceLockModule {
   requestDeviceAdmin?: () => Promise<boolean>;
   lockDevice?: () => Promise<'LOCKED_ADMIN' | 'LOCKED_FALLBACK'>;
   restoreScreenState?: () => Promise<boolean>;
+  setLockScreenPlaybackEnabled?: (enabled: boolean) => Promise<boolean>;
+  setPlaybackActiveState?: (isPlaying: boolean, title?: string) => Promise<boolean>;
 }
 
 function getNativeModule(): NativeDeviceLockModule | undefined {
@@ -77,6 +79,40 @@ export const deviceLock = {
     if (Platform.OS === 'android' && nativeMod?.restoreScreenState) {
       try {
         return Boolean(await nativeMod.restoreScreenState());
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  },
+
+  /**
+   * Activa o desactiva en el módulo nativo de Android la reproducción continua
+   * cuando la pantalla del dispositivo está bloqueada.
+   */
+  async setLockScreenPlaybackEnabled(enabled: boolean): Promise<boolean> {
+    const nativeMod = getNativeModule();
+    if (Platform.OS === 'android' && nativeMod?.setLockScreenPlaybackEnabled) {
+      try {
+        return Boolean(await nativeMod.setLockScreenPlaybackEnabled(Boolean(enabled)));
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  },
+
+  /**
+   * Informa al módulo nativo de Android si actualmente hay un vídeo en reproducción
+   * para gestionar el WakeLock de CPU/Wi-Fi y el servicio de reproducción con pantalla bloqueada.
+   */
+  async setPlaybackActiveState(isPlaying: boolean, title?: string): Promise<boolean> {
+    const nativeMod = getNativeModule();
+    if (Platform.OS === 'android' && nativeMod?.setPlaybackActiveState) {
+      try {
+        return Boolean(
+          await nativeMod.setPlaybackActiveState(Boolean(isPlaying), title ?? '')
+        );
       } catch {
         return false;
       }

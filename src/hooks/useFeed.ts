@@ -21,16 +21,6 @@ export interface UseFeedReturn {
  *   e informa mediante `isOfflineData = true`.
  */
 export function useFeed(favorites: FavoriteChannel[], favoritesLoading = false): UseFeedReturn {
-  const [videos, setVideos] = useState<VideoItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [error, setError] = useState<YouTubeAppError | null>(null);
-  const [isOfflineData, setIsOfflineData] = useState<boolean>(false);
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
-
-  const favoritesRef = useRef<FavoriteChannel[]>(favorites);
-  favoritesRef.current = favorites;
-
   const signature = useMemo(
     () =>
       favorites
@@ -40,7 +30,41 @@ export function useFeed(favorites: FavoriteChannel[], favoritesLoading = false):
     [favorites]
   );
 
-  const lastLoadedSignatureRef = useRef<string | null>(null);
+  const initialSyncCache = useMemo(
+    () =>
+      !favoritesLoading && signature
+        ? storage.getSyncFeedCache(signature)
+        : null,
+    // Solo evaluar en la inicialización
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  const hasInitialReadyCache = Boolean(
+    !favoritesLoading &&
+      (favorites.length === 0 ||
+        (initialSyncCache &&
+          initialSyncCache.videos.length > 0 &&
+          !initialSyncCache.isStale))
+  );
+
+  const [videos, setVideos] = useState<VideoItem[]>(
+    () => initialSyncCache?.videos ?? []
+  );
+  const [loading, setLoading] = useState<boolean>(() => !hasInitialReadyCache);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [error, setError] = useState<YouTubeAppError | null>(null);
+  const [isOfflineData, setIsOfflineData] = useState<boolean>(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(
+    () => initialSyncCache?.updatedAt ?? null
+  );
+
+  const favoritesRef = useRef<FavoriteChannel[]>(favorites);
+  favoritesRef.current = favorites;
+
+  const lastLoadedSignatureRef = useRef<string | null>(
+    hasInitialReadyCache ? signature : null
+  );
 
   const fetchFeed = useCallback(
     async (forceRefresh = false) => {
@@ -57,6 +81,7 @@ export function useFeed(favorites: FavoriteChannel[], favoritesLoading = false):
         setLoading(false);
         setRefreshing(false);
         lastLoadedSignatureRef.current = '';
+        storage.markInitialFeedReady();
         return;
       }
 
@@ -80,8 +105,10 @@ export function useFeed(favorites: FavoriteChannel[], favoritesLoading = false):
           setLoading(false);
           setRefreshing(false);
           lastLoadedSignatureRef.current = signature;
+          storage.markInitialFeedReady();
           return;
         }
+        storage.markInitialFeedReady();
       }
 
       // 2. Obtener vídeos actualizados desde YouTube
@@ -122,6 +149,7 @@ export function useFeed(favorites: FavoriteChannel[], favoritesLoading = false):
       } finally {
         setLoading(false);
         setRefreshing(false);
+        storage.markInitialFeedReady();
       }
     },
     [favoritesLoading, signature]

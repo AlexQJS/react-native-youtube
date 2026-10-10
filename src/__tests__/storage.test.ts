@@ -247,5 +247,38 @@ describe('Storage Service', () => {
       expect(saved[0].video.id).toBe(`hist_vid_${max + 14}`);
     });
   });
+
+  describe('Reproducción con pantalla bloqueada (lockScreenPlayback)', () => {
+    it('devuelve el valor por defecto cuando no hay preferencia guardada', async () => {
+      const initial = await storage.getLockScreenPlayback();
+      expect(initial).toBe(config.playback.defaultLockScreenPlayback);
+      expect(storage.isLockScreenPlaybackLoaded()).toBe(true);
+    });
+
+    it('guarda, persiste en AsyncStorage y notifica cambios reactivamente', async () => {
+      const events: boolean[] = [];
+      const unsubscribe = storage.subscribeLockScreenPlayback((enabled) => {
+        events.push(enabled);
+      });
+
+      await storage.saveLockScreenPlayback(true);
+      expect(storage.getSyncLockScreenPlayback()).toBe(true);
+      expect(events).toEqual([true]);
+
+      storage.resetMemoryCache();
+      const loaded = await storage.getLockScreenPlayback();
+      expect(loaded).toBe(true);
+
+      await storage.saveLockScreenPlayback(false);
+      expect(storage.getSyncLockScreenPlayback()).toBe(false);
+
+      storage.resetMemoryCache();
+      const loadedAfterDisable = await storage.getLockScreenPlayback();
+      expect(loadedAfterDisable).toBe(false);
+
+      unsubscribe();
+    });
+  });
 });
+
 

@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
+  AppStateStatus,
   Linking,
   Pressable,
   Share,
@@ -13,12 +15,14 @@ import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { config } from '../config/config';
+import { useLockScreenPlayback } from '../hooks/useLockScreenPlayback';
 import {
   SleepTimerOptionId,
   useSleepTimer,
   VIDEO_PLAYER_KEEP_AWAKE_TAG,
 } from '../hooks/useSleepTimer';
 import { useThemeColors } from '../hooks/useThemeColors';
+import { deviceLock } from '../services/deviceLock';
 import { calculateProgressRatio, formatDuration } from '../utils/format';
 
 export { VIDEO_PLAYER_KEEP_AWAKE_TAG };
@@ -69,9 +73,14 @@ function getPlayerErrorMessage(errorCode?: number): string {
 /**
  * Genera el documento HTML mínimo que carga la YouTube IFrame Player API oficial.
  */
-export function buildYouTubeIframeHtml(videoId: string, startSeconds: number): string {
+export function buildYouTubeIframeHtml(
+  videoId: string,
+  startSeconds: number,
+  allowLockScreenPlayback: boolean = false
+): string {
   const safeVideoId = videoId.replace(/[^a-zA-Z0-9_-]/g, '');
   const safeStart = Math.max(0, Math.floor(startSeconds || 0));
+  const initialLockPlaybackFlag = allowLockScreenPlayback ? 'true' : 'false';
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -91,6 +100,84 @@ export function buildYouTubeIframeHtml(videoId: string, startSeconds: number): s
     var player = null;
     var progressTimer = null;
     var wakeLockSentinel = null;
+    window.__ytAllowLockScreenPlayback = ${initialLockPlaybackFlag};
+    window.__ytScreenLockedOrBackground = false;
+    var shouldKeepPlaying = true;
+
+    function setAllowLockScreenPlayback(enabled) {
+      window.__ytAllowLockScreenPlayback = !!enabled;
+    }
+    window.setAllowLockScreenPlayback = setAllowLockScreenPlayback;
+
+    window.pauseFromUser = function() {
+      shouldKeepPlaying = false;
+      if (player && typeof player.pauseVideo === 'function') {
+        player.pauseVideo();
+      }
+    };
+
+    window.playFromUser = function() {
+      shouldKeepPlaying = true;
+      if (player && typeof player.playVideo === 'function') {
+        player.playVideo();
+      }
+    };
+
+    function installVisibilityOverride(targetDoc, targetWin) {
+      if (!targetDoc || !targetWin) return;
+      try {
+        var docProto = targetWin.Document ? targetWin.Document.prototype : Document.prototype;
+        var nativeHidden = Object.getOwnPropertyDescriptor(docProto, 'hidden') ||
+          Object.getOwnPropertyDescriptor(targetDoc, 'hidden');
+        var nativeVisibility = Object.getOwnPropertyDescriptor(docProto, 'visibilityState') ||
+          Object.getOwnPropertyDescriptor(targetDoc, 'visibilityState');
+
+        Object.defineProperty(targetDoc, 'hidden', {
+          configurable: true,
+          get: function() {
+            if (window.__ytAllowLockScreenPlayback) return false;
+            return nativeHidden && nativeHidden.get ? nativeHidden.get.call(targetDoc) : false;
+          }
+        });
+        Object.defineProperty(targetDoc, 'visibilityState', {
+          configurable: true,
+          get: function() {
+            if (window.__ytAllowLockScreenPlayback) return 'visible';
+            return nativeVisibility && nativeVisibility.get ? nativeVisibility.get.call(targetDoc) : 'visible';
+          }
+        });
+        Object.defineProperty(targetDoc, 'webkitHidden', {
+          configurable: true,
+          get: function() {
+            return window.__ytAllowLockScreenPlayback ? false : targetDoc.hidden;
+          }
+        });
+        Object.defineProperty(targetDoc, 'webkitVisibilityState', {
+          configurable: true,
+          get: function() {
+            return window.__ytAllowLockScreenPlayback ? 'visible' : targetDoc.visibilityState;
+          }
+        });
+      } catch (e) {}
+
+      var blockIfAllowed = function(event) {
+        if (window.__ytAllowLockScreenPlayback) {
+          event.stopImmediatePropagation();
+          event.stopPropagation();
+        }
+      };
+
+      try {
+        targetDoc.addEventListener('visibilitychange', blockIfAllowed, true);
+        targetDoc.addEventListener('webkitvisibilitychange', blockIfAllowed, true);
+        targetWin.addEventListener('visibilitychange', blockIfAllowed, true);
+        targetWin.addEventListener('pagehide', blockIfAllowed, true);
+        targetWin.addEventListener('freeze', blockIfAllowed, true);
+        targetWin.addEventListener('blur', blockIfAllowed, true);
+      } catch (e) {}
+    }
+
+    installVisibilityOverride(document, window);
 
     function requestWakeLock() {
       if (navigator && navigator.wakeLock && typeof navigator.wakeLock.request === 'function') {
@@ -165,6 +252,11 @@ export function buildYouTubeIframeHtml(videoId: string, startSeconds: number): s
             if (iframe && iframe.setAttribute) {
               iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
             }
+            try {
+              if (iframe && iframe.contentDocument && iframe.contentWindow) {
+                installVisibilityOverride(iframe.contentDocument, iframe.contentWindow);
+              }
+            } catch (e) {}
             var duration = event.target.getDuration ? event.target.getDuration() : 0;
             postToNative({
               type: 'READY',
@@ -172,6 +264,7 @@ export function buildYouTubeIframeHtml(videoId: string, startSeconds: number): s
               duration: duration || 0
             });
             if (event.target && typeof event.target.playVideo === 'function') {
+              shouldKeepPlaying = true;
               event.target.playVideo();
             }
           },
@@ -179,6 +272,26 @@ export function buildYouTubeIframeHtml(videoId: string, startSeconds: number): s
             var state = event.data;
             var position = event.target.getCurrentTime ? event.target.getCurrentTime() : 0;
             var duration = event.target.getDuration ? event.target.getDuration() : 0;
+
+            if (
+              state === YT.PlayerState.PAUSED &&
+              window.__ytAllowLockScreenPlayback &&
+              shouldKeepPlaying &&
+              window.__ytScreenLockedOrBackground
+            ) {
+              setTimeout(function() {
+                if (
+                  window.__ytAllowLockScreenPlayback &&
+                  shouldKeepPlaying &&
+                  player &&
+                  typeof player.playVideo === 'function'
+                ) {
+                  player.playVideo();
+                }
+              }, 50);
+              return;
+            }
+
             postToNative({
               type: 'STATE_CHANGE',
               state: state,
@@ -186,11 +299,15 @@ export function buildYouTubeIframeHtml(videoId: string, startSeconds: number): s
               duration: duration || 0
             });
             if (state === YT.PlayerState.PLAYING) {
+              shouldKeepPlaying = true;
               startTracking();
               requestWakeLock();
             } else {
               stopTracking();
               if (state === YT.PlayerState.PAUSED || state === YT.PlayerState.ENDED) {
+                if (state === YT.PlayerState.ENDED || !window.__ytScreenLockedOrBackground) {
+                  shouldKeepPlaying = false;
+                }
                 releaseWakeLock();
               }
             }
@@ -230,6 +347,7 @@ export function VideoPlayer({
   onRestartProgress,
 }: VideoPlayerProps) {
   const { colors } = useThemeColors();
+  const { isLockScreenPlaybackEnabled } = useLockScreenPlayback();
   const { height: windowHeight } = useWindowDimensions();
   const webViewRef = useRef<WebView | null>(null);
 
@@ -259,19 +377,36 @@ export function VideoPlayer({
     startSecondsRef.current = initialPosition;
   }
 
+  const initialLockPlaybackRef = useRef<boolean>(isLockScreenPlaybackEnabled);
+  initialLockPlaybackRef.current = isLockScreenPlaybackEnabled;
+
+  const isPlayingRef = useRef<boolean>(isPlaying);
+  isPlayingRef.current = isPlaying;
+
+  const isLockScreenPlaybackEnabledRef = useRef<boolean>(isLockScreenPlaybackEnabled);
+  isLockScreenPlaybackEnabledRef.current = isLockScreenPlaybackEnabled;
+
+  const currentPositionRef = useRef<number>(currentPosition);
+  currentPositionRef.current = currentPosition;
+
+  const durationRef = useRef<number>(duration);
+  durationRef.current = duration;
+
   const handleSleepExpire = useCallback(() => {
     setIsPlaying(false);
+    isPlayingRef.current = false;
     setIsSleepMenuOpen(false);
     startSecondsRef.current = currentPosition;
+    deviceLock.setPlaybackActiveState(false, title).catch(() => {});
     deactivateKeepAwake(VIDEO_PLAYER_KEEP_AWAKE_TAG).catch(() => {});
     deactivateKeepAwake().catch(() => {});
     if (webViewRef.current) {
       webViewRef.current.injectJavaScript(
-        'if (typeof releaseWakeLock === "function") { releaseWakeLock(); } if (typeof stopTracking === "function") { stopTracking(); } if (player && player.pauseVideo) { player.pauseVideo(); } document.querySelectorAll("video").forEach(function(v){ try { v.pause(); } catch(e){} }); true;'
+        'if (typeof releaseWakeLock === "function") { releaseWakeLock(); } if (typeof stopTracking === "function") { stopTracking(); } if (typeof window.pauseFromUser === "function") { window.pauseFromUser(); } else if (player && player.pauseVideo) { player.pauseVideo(); } document.querySelectorAll("video").forEach(function(v){ try { v.pause(); } catch(e){} }); true;'
       );
     }
     onFlushProgress(currentPosition, duration);
-  }, [currentPosition, duration, onFlushProgress]);
+  }, [currentPosition, duration, onFlushProgress, title]);
 
   const {
     options: sleepOptions,
@@ -289,6 +424,88 @@ export function VideoPlayer({
     isPlaying,
   });
 
+  const isSleepTriggeredRef = useRef<boolean>(isSleepTriggered);
+  isSleepTriggeredRef.current = isSleepTriggered;
+
+  // Sincronizar con el puente nativo y el WebView la preferencia de reproducir con pantalla bloqueada
+  useEffect(() => {
+    deviceLock
+      .setLockScreenPlaybackEnabled(isLockScreenPlaybackEnabled)
+      .catch(() => {});
+
+    if (webViewRef.current) {
+      const flag = isLockScreenPlaybackEnabled ? 'true' : 'false';
+      webViewRef.current.injectJavaScript(
+        `if (typeof window.setAllowLockScreenPlayback === "function") { window.setAllowLockScreenPlayback(${flag}); } else { window.__ytAllowLockScreenPlayback = ${flag}; } true;`
+      );
+    }
+  }, [isLockScreenPlaybackEnabled, isReady]);
+
+  // Informar al módulo nativo cuando el vídeo está reproduciéndose activamente
+  useEffect(() => {
+    const active = isPlaying && !isSleepTriggered;
+    deviceLock.setPlaybackActiveState(active, title).catch(() => {});
+
+    return () => {
+      if (!active) {
+        deviceLock.setPlaybackActiveState(false, title).catch(() => {});
+      }
+    };
+  }, [isPlaying, isSleepTriggered, title]);
+
+  // Al desmontar el reproductor, liberar el estado de reproducción nativa
+  useEffect(() => {
+    return () => {
+      deviceLock.setPlaybackActiveState(false).catch(() => {});
+    };
+  }, []);
+
+  // Gestionar el paso a segundo plano / bloqueo de pantalla según el toggle de configuración
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      const isBackgroundOrLocked =
+        nextAppState === 'background' || nextAppState === 'inactive';
+
+      if (isBackgroundOrLocked) {
+        if (isLockScreenPlaybackEnabledRef.current && !isSleepTriggeredRef.current) {
+          if (isPlayingRef.current) {
+            deviceLock.setPlaybackActiveState(true, title).catch(() => {});
+            if (webViewRef.current) {
+              webViewRef.current.injectJavaScript(
+                'window.__ytScreenLockedOrBackground = true; window.__ytAllowLockScreenPlayback = true; if (typeof window.playFromUser === "function") { window.playFromUser(); } else if (player && player.playVideo) { player.playVideo(); } document.querySelectorAll("video").forEach(function(v){ try { if (v.paused) { v.play(); } } catch(e){} }); true;'
+              );
+            }
+          } else if (webViewRef.current) {
+            webViewRef.current.injectJavaScript(
+              'window.__ytScreenLockedOrBackground = true; true;'
+            );
+          }
+        } else if (!isLockScreenPlaybackEnabledRef.current && isPlayingRef.current) {
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          deviceLock.setPlaybackActiveState(false, title).catch(() => {});
+          if (webViewRef.current) {
+            webViewRef.current.injectJavaScript(
+              'window.__ytScreenLockedOrBackground = true; window.__ytAllowLockScreenPlayback = false; if (typeof window.pauseFromUser === "function") { window.pauseFromUser(); } else if (player && player.pauseVideo) { player.pauseVideo(); } document.querySelectorAll("video").forEach(function(v){ try { v.pause(); } catch(e){} }); true;'
+            );
+          }
+          onFlushProgress(currentPositionRef.current, durationRef.current);
+        }
+      } else if (nextAppState === 'active') {
+        if (webViewRef.current) {
+          webViewRef.current.injectJavaScript(
+            'window.__ytScreenLockedOrBackground = false; true;'
+          );
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, [onFlushProgress, title]);
+
   // Evitar que el móvil se bloquee mientras el vídeo se esté reproduciendo,
   // y liberar el bloqueo inmediatamente cuando se pausa o termina el Sleep Mode
   useEffect(() => {
@@ -304,7 +521,12 @@ export function VideoPlayer({
   }, [isPlaying, isSleepTriggered]);
 
   const htmlSource = useMemo(
-    () => buildYouTubeIframeHtml(videoId, startSecondsRef.current),
+    () =>
+      buildYouTubeIframeHtml(
+        videoId,
+        startSecondsRef.current,
+        initialLockPlaybackRef.current
+      ),
     [videoId, reloadKey]
   );
 
@@ -348,6 +570,21 @@ export function VideoPlayer({
               setIsPlaying(true);
               onProgressUpdate(effectivePos, dur);
             } else if (msg.state === 2) {
+              const appInBackground =
+                AppState.currentState === 'background' ||
+                AppState.currentState === 'inactive';
+              if (
+                appInBackground &&
+                isLockScreenPlaybackEnabledRef.current &&
+                isPlayingRef.current &&
+                !isSleepTriggeredRef.current &&
+                webViewRef.current
+              ) {
+                webViewRef.current.injectJavaScript(
+                  'if (typeof window.playFromUser === "function") { window.playFromUser(); } else if (player && player.playVideo) { player.playVideo(); } true;'
+                );
+                break;
+              }
               setIsPlaying(false);
               onFlushProgress(effectivePos, dur);
             } else if (msg.state === 0) {
@@ -387,8 +624,8 @@ export function VideoPlayer({
     }
     if (!webViewRef.current) return;
     const command = isPlaying
-      ? 'if (player && player.pauseVideo) { player.pauseVideo(); } true;'
-      : 'if (player && player.playVideo) { player.playVideo(); } true;';
+      ? 'if (typeof window.pauseFromUser === "function") { window.pauseFromUser(); } else if (player && player.pauseVideo) { player.pauseVideo(); } true;'
+      : 'if (typeof window.playFromUser === "function") { window.playFromUser(); } else if (player && player.playVideo) { player.playVideo(); } true;';
     webViewRef.current.injectJavaScript(command);
   }, [currentPosition, dismissSleepTriggered, isPlaying, isSleepTriggered]);
 

@@ -16,17 +16,26 @@ type FavoritesListener = (favorites: FavoriteChannel[]) => void;
 type ProgressListener = (progress: PlaybackProgressMap) => void;
 type HistoryListener = (history: WatchHistoryItem[]) => void;
 type ThemeModeListener = (mode: ThemeMode) => void;
+type LockScreenPlaybackListener = (enabled: boolean) => void;
+
+type InitialFeedReadyListener = () => void;
 
 const favoritesListeners = new Set<FavoritesListener>();
 const progressListeners = new Set<ProgressListener>();
 const historyListeners = new Set<HistoryListener>();
 const themeListeners = new Set<ThemeModeListener>();
+const lockScreenPlaybackListeners = new Set<LockScreenPlaybackListener>();
+const initialFeedReadyListeners = new Set<InitialFeedReadyListener>();
 
 let memoryFavorites: FavoriteChannel[] | null = null;
 let memoryProgress: PlaybackProgressMap | null = null;
 let memoryHistory: WatchHistoryItem[] | null = null;
+let memoryFeedCache: CacheEntry<VideoItem[]> | null = null;
 let memoryThemeMode: ThemeMode | null = null;
 let memoryThemeLoaded = false;
+let memoryLockScreenPlayback: boolean | null = null;
+let memoryLockScreenPlaybackLoaded = false;
+let memoryInitialFeedReady = false;
 
 function notifyFavorites(favorites: FavoriteChannel[]) {
   favoritesListeners.forEach((listener) => {
@@ -62,6 +71,26 @@ function notifyThemeMode(mode: ThemeMode) {
   themeListeners.forEach((listener) => {
     try {
       listener(mode);
+    } catch {
+      // Evitar que un listener defectuoso rompa el flujo
+    }
+  });
+}
+
+function notifyLockScreenPlayback(enabled: boolean) {
+  lockScreenPlaybackListeners.forEach((listener) => {
+    try {
+      listener(enabled);
+    } catch {
+      // Evitar que un listener defectuoso rompa el flujo
+    }
+  });
+}
+
+function notifyInitialFeedReady() {
+  initialFeedReadyListeners.forEach((listener) => {
+    try {
+      listener();
     } catch {
       // Evitar que un listener defectuoso rompa el flujo
     }
@@ -226,8 +255,40 @@ export const storage = {
     memoryFavorites = null;
     memoryProgress = null;
     memoryHistory = null;
+    memoryFeedCache = null;
     memoryThemeMode = null;
     memoryThemeLoaded = false;
+    memoryLockScreenPlayback = null;
+    memoryLockScreenPlaybackLoaded = false;
+    memoryInitialFeedReady = false;
+  },
+
+  /**
+   * Indica si la pantalla de inicio (Feed) ya completó su carga inicial.
+   */
+  isInitialFeedReady(): boolean {
+    return memoryInitialFeedReady;
+  },
+
+  /**
+   * Marca la pantalla de inicio (Feed) como lista y notifica a los oyentes.
+   */
+  markInitialFeedReady(): void {
+    if (memoryInitialFeedReady) {
+      return;
+    }
+    memoryInitialFeedReady = true;
+    notifyInitialFeedReady();
+  },
+
+  /**
+   * Suscribe un callback para cuando la pantalla de inicio (Feed) esté lista.
+   */
+  subscribeInitialFeedReady(listener: InitialFeedReadyListener): () => void {
+    initialFeedReadyListeners.add(listener);
+    return () => {
+      initialFeedReadyListeners.delete(listener);
+    };
   },
 
   /**
@@ -296,6 +357,81 @@ export const storage = {
   },
 
   /**
+   * Suscribe un callback a cambios en la opción de reproducción con pantalla bloqueada.
+   */
+  subscribeLockScreenPlayback(listener: LockScreenPlaybackListener): () => void {
+    lockScreenPlaybackListeners.add(listener);
+    return () => {
+      lockScreenPlaybackListeners.delete(listener);
+    };
+  },
+
+  /**
+   * Devuelve de forma síncrona si la reproducción con pantalla bloqueada está activa en memoria.
+   */
+  getSyncLockScreenPlayback(): boolean | null {
+    return memoryLockScreenPlayback;
+  },
+
+  /**
+   * Indica si ya se ha consultado la preferencia de reproducción con pantalla bloqueada en esta sesión.
+   */
+  isLockScreenPlaybackLoaded(): boolean {
+    return memoryLockScreenPlaybackLoaded;
+  },
+
+  /**
+   * Obtiene la preferencia de reproducción con pantalla bloqueada almacenada en AsyncStorage.
+   */
+  async getLockScreenPlayback(): Promise<boolean> {
+    if (memoryLockScreenPlaybackLoaded && memoryLockScreenPlayback !== null) {
+      return memoryLockScreenPlayback;
+    }
+
+    try {
+      const raw = await AsyncStorage.getItem(config.storageKeys.lockScreenPlayback);
+      memoryLockScreenPlaybackLoaded = true;
+      if (raw === 'true' || raw === 'false') {
+        const parsed = raw === 'true';
+        const changed = memoryLockScreenPlayback !== parsed;
+        memoryLockScreenPlayback = parsed;
+        if (changed) {
+          notifyLockScreenPlayback(parsed);
+        }
+        return parsed;
+      }
+      const fallback =
+        memoryLockScreenPlayback ?? config.playback.defaultLockScreenPlayback;
+      memoryLockScreenPlayback = fallback;
+      return fallback;
+    } catch {
+      memoryLockScreenPlaybackLoaded = true;
+      const fallback =
+        memoryLockScreenPlayback ?? config.playback.defaultLockScreenPlayback;
+      memoryLockScreenPlayback = fallback;
+      return fallback;
+    }
+  },
+
+  /**
+   * Guarda la preferencia de reproducción con pantalla bloqueada y notifica a los observadores.
+   */
+  async saveLockScreenPlayback(enabled: boolean): Promise<void> {
+    const normalized = Boolean(enabled);
+    memoryLockScreenPlayback = normalized;
+    memoryLockScreenPlaybackLoaded = true;
+    notifyLockScreenPlayback(normalized);
+    try {
+      await AsyncStorage.setItem(
+        config.storageKeys.lockScreenPlayback,
+        normalized ? 'true' : 'false'
+      );
+    } catch {
+      // No bloquear la UI si falla la escritura secundaria
+    }
+  },
+
+  /**
    * Suscribe un callback a cambios en la lista de canales favoritos.
    */
   subscribeFavorites(listener: FavoritesListener): () => void {
@@ -323,6 +459,20 @@ export const storage = {
     return () => {
       historyListeners.delete(listener);
     };
+  },
+
+  /**
+   * Devuelve de forma síncrona la lista de canales favoritos en memoria (si ya se cargó).
+   */
+  getSyncFavorites(): FavoriteChannel[] | null {
+    return memoryFavorites !== null ? [...memoryFavorites] : null;
+  },
+
+  /**
+   * Indica si la lista de canales favoritos ya se cargó en memoria en esta sesión.
+   */
+  isFavoritesLoaded(): boolean {
+    return memoryFavorites !== null;
   },
 
   /**
@@ -735,6 +885,31 @@ export const storage = {
   },
 
   /**
+   * Devuelve de forma síncrona la caché del Feed en memoria si coincide con la firma de canales.
+   */
+  getSyncFeedCache(
+    channelsSignature?: string
+  ): { videos: VideoItem[]; updatedAt: number; isStale: boolean } | null {
+    if (!memoryFeedCache || !Array.isArray(memoryFeedCache.data)) {
+      return null;
+    }
+    if (
+      channelsSignature &&
+      memoryFeedCache.key &&
+      memoryFeedCache.key !== channelsSignature
+    ) {
+      return null;
+    }
+    const ageMs = Date.now() - memoryFeedCache.updatedAt;
+    const isStale = ageMs > config.cache.feedTtlMs;
+    return {
+      videos: [...memoryFeedCache.data],
+      updatedAt: memoryFeedCache.updatedAt,
+      isStale,
+    };
+  },
+
+  /**
    * Obtiene la caché local del Feed junto con un indicador de si ha expirado (isStale).
    */
   async getFeedCache(
@@ -750,6 +925,8 @@ export const storage = {
       if (!parsed || !Array.isArray(parsed.data) || typeof parsed.updatedAt !== 'number') {
         return null;
       }
+
+      memoryFeedCache = parsed;
 
       if (channelsSignature && parsed.key && parsed.key !== channelsSignature) {
         return null;
@@ -772,12 +949,13 @@ export const storage = {
    * Guarda en caché local los vídeos del Feed junto con la firma de canales favoritos actuales.
    */
   async saveFeedCache(videos: VideoItem[], channelsSignature?: string): Promise<void> {
+    const payload: CacheEntry<VideoItem[]> = {
+      data: videos,
+      updatedAt: Date.now(),
+      key: channelsSignature,
+    };
+    memoryFeedCache = payload;
     try {
-      const payload: CacheEntry<VideoItem[]> = {
-        data: videos,
-        updatedAt: Date.now(),
-        key: channelsSignature,
-      };
       await AsyncStorage.setItem(config.storageKeys.feedCache, JSON.stringify(payload));
     } catch {
       // No bloquear la UI si falla la caché secundaria

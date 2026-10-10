@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -7,7 +7,12 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Tabs, usePathname, useRouter } from 'expo-router';
+import {
+  SplashScreen,
+  Tabs,
+  usePathname,
+  useRouter,
+} from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -15,10 +20,18 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { PersistentPlayerHost } from '../components/PersistentPlayerHost';
-import { SplashScreen } from '../components/SplashScreen';
+import { SplashScreen as BrandSplashScreen } from '../components/SplashScreen';
 import { config } from '../config/config';
 import { PlayerProvider, usePlayer } from '../context/PlayerContext';
 import { useThemeColors } from '../hooks/useThemeColors';
+import { deviceLock } from '../services/deviceLock';
+import { storage } from '../services/storage';
+
+// Congelamos la pantalla de inicio nativa para evitar que se oculte automáticamente
+// antes de que los datos y la interfaz principal estén listos.
+void SplashScreen.preventAutoHideAsync().catch(() => {
+  // Ignorar en entornos de test o plataformas sin módulo nativo
+});
 
 function BottomNavigationBar() {
   const router = useRouter();
@@ -269,15 +282,118 @@ function AppShell() {
 }
 
 export default function RootLayout() {
+  const [isAppReady, setIsAppReady] = useState(false);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
+  const hasHiddenNativeSplashRef = useRef(false);
+
+  const hideNativeSplash = useCallback(() => {
+    if (hasHiddenNativeSplashRef.current) {
+      return;
+    }
+    hasHiddenNativeSplashRef.current = true;
+    void SplashScreen.hideAsync().catch(() => {
+      // Ignorar errores en entornos sin módulo nativo
+    });
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    let unsubscribeFeedReady: (() => void) | null = null;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const markReady = () => {
+      if (!mounted) {
+        return;
+      }
+      if (fallbackTimer) {
+        clearTimeout(fallbackTimer);
+        fallbackTimer = null;
+      }
+      if (unsubscribeFeedReady) {
+        unsubscribeFeedReady();
+        unsubscribeFeedReady = null;
+      }
+      setIsAppReady(true);
+    };
+
+    async function prepareInitialScreen() {
+      try {
+        const [, favorites, , lockScreenPlayback] = await Promise.all([
+          storage.getThemeMode(),
+          storage.getFavorites(),
+          storage.getPlaybackProgress(),
+          storage.getLockScreenPlayback(),
+        ]);
+
+        deviceLock.setLockScreenPlaybackEnabled(lockScreenPlayback).catch(() => {});
+
+        if (favorites.length > 0) {
+          const signature = favorites
+            .map((c) => c.id)
+            .sort()
+            .join(',');
+          const cached = await storage.getFeedCache(signature);
+          if (cached && cached.videos.length > 0) {
+            storage.markInitialFeedReady();
+          }
+        } else {
+          storage.markInitialFeedReady();
+        }
+      } catch {
+        storage.markInitialFeedReady();
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      if (storage.isInitialFeedReady()) {
+        markReady();
+      } else {
+        unsubscribeFeedReady = storage.subscribeInitialFeedReady(() => {
+          markReady();
+        });
+        fallbackTimer = setTimeout(() => {
+          markReady();
+        }, 3000);
+      }
+    }
+
+    void prepareInitialScreen();
+
+    return () => {
+      mounted = false;
+      if (fallbackTimer) {
+        clearTimeout(fallbackTimer);
+      }
+      if (unsubscribeFeedReady) {
+        unsubscribeFeedReady();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isAppReady) {
+      hideNativeSplash();
+    }
+  }, [isAppReady, hideNativeSplash]);
+
+  const handleRootLayout = useCallback(() => {
+    if (isAppReady) {
+      hideNativeSplash();
+    }
+  }, [isAppReady, hideNativeSplash]);
 
   return (
     <SafeAreaProvider>
       <PlayerProvider>
-        <View style={styles.outerRoot}>
+        <View style={styles.outerRoot} onLayout={handleRootLayout}>
           <AppShell />
           {isSplashVisible && (
-            <SplashScreen onFinish={() => setIsSplashVisible(false)} />
+            <BrandSplashScreen
+              isReady={isAppReady}
+              onFinish={() => setIsSplashVisible(false)}
+            />
           )}
         </View>
       </PlayerProvider>
