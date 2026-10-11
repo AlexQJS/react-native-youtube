@@ -1,124 +1,140 @@
 # Video Feed — React Native + Expo
 
-Aplicación móvil multiplataforma (**iOS y Android**) desarrollada con **React Native, Expo, TypeScript y Expo Router** para descubrir y reproducir vídeos de tus canales favoritos de YouTube, gestionar suscripciones locales y mantener el progreso de reproducción de cada vídeo entre sesiones.
+A cross-platform mobile application (**Android & iOS**) built with **React Native, Expo (SDK 57), TypeScript, and Expo Router** to follow your favorite YouTube channels, watch videos and Shorts with a persistent floating mini-player, track playback progress, and manage watch history locally.
 
 ---
 
-## Características principales
+## Key Features
 
-- **Pestaña Feed**:
-  - Muestra los últimos vídeos publicados por tus canales favoritos ordenados del más reciente al más antiguo.
-  - Barra de filtro rápido por canal favorito.
-  - Indicador visual de progreso en la miniatura de cada vídeo (barra inferior + etiqueta de minuto actual o `"Visto"`).
-  - Soporte para **Pull-to-refresh**, **caché local configurable** y **modo offline** con aviso cuando se muestran datos almacenados localmente.
-- **Pestaña Buscar**:
-  - Búsqueda de canales de YouTube con **debounce** configurable (`400 ms`) para evitar peticiones innecesarias.
-  - Gestión rápida para añadir o quitar canales de favoritos con persistencia local inmediata.
-- **Reproductor embebido (`VideoPlayer`)**:
-  - Basado en la **YouTube IFrame Player API** oficial mediante `react-native-webview`.
-  - Recupera automáticamente el progreso almacenado y continúa la reproducción desde el punto donde se dejó.
-  - Guarda el progreso periódicamente (por defecto cada `10 segundos`, configurable en `src/config/config.ts`), al pausar y al salir del reproductor.
-  - Permite reiniciar el vídeo desde el principio en cualquier momento.
-
----
-
-## Cumplimiento de Políticas y Términos de Servicio de YouTube
-
-De acuerdo con los **Términos de Servicio de los Servicios de API de YouTube (YouTube API Services Terms of Service)** y las políticas para desarrolladores:
-
-1. **Publicidad y reproductor embebido**:
-   - Está estrictamente prohibido bloquear, interceptar, modificar o suprimir los anuncios servidos por YouTube dentro del reproductor embebido (`YT.Player`), así como superponer capas que oculten los controles nativos o la atribución de YouTube.
-   - No existe ningún parámetro oficial de la API de YouTube que permita desactivar la publicidad en vídeos monetizados; aunque se utiliza el dominio oficial de privacidad mejorada (`https://www.youtube-nocookie.com`) junto con `origin` válido para cumplir los requisitos de identidad del reproductor embebido, los anuncios gestionados por YouTube se respetan íntegramente.
-2. **Sin descarga ni extracción de flujos**:
-   - La aplicación no descarga flujos de audio/vídeo ni almacena contenido multimedia; únicamente guarda metadatos básicos de canales favoritos y marcas de tiempo (`position`, `duration`, `updatedAt`) en almacenamiento local (`AsyncStorage`).
+- **Feed (`/feed`)**:
+  - Chronological feed of the latest uploads from your favorite channels.
+  - Filter by channel chips and toggle between **Videos** (16:9) and **Shorts** (9:16 2-column grid).
+  - Visual progress bars and completion badges on video thumbnails.
+  - Pull-to-refresh, local TTL caching, offline mode fallback, and automatic RSS/web fallback when no API key is configured or quota is reached.
+- **Search (`/search`)**:
+  - Debounced search (`400 ms`) across YouTube **Channels** and **Videos** (`All`, `Videos`, `Channels` filters).
+  - Follow/unfollow channels with instant local persistence (`AsyncStorage`).
+- **Watch History (`/history`)**:
+  - Automatically logs watched videos (up to 200 items) with resume position and completion status.
+  - Remove individual entries or clear the entire history.
+- **Settings & Analytics (`/config`)**:
+  - **Theme**: Switch between **Dark** and **Light** modes.
+  - **Lock-Screen Playback**: Keep video audio playing when the device screen is locked (powered by an Android Foreground Media Service via a custom Expo Config Plugin).
+  - **Weekly Watch Time**: 7-day bar chart with total watch time, daily average, and peak day metrics.
+- **Persistent Video Player & Mini-Player**:
+  - Built on the official **YouTube IFrame Player API** (`youtube-nocookie.com`) inside `react-native-webview`.
+  - Minimize any playing video into a floating **Mini-Player** while navigating across tabs.
+  - Auto-saves playback progress periodically (`10s`), on pause, and on exit.
+  - **Sleep Timer** (`5m`, `15m`, `30m`, `1h`, `2h`, or `End of video`) with automatic screen lock support on Android (`DevicePolicyManager`).
+  - Expandable video description and **YouTube comments & replies** viewer.
 
 ---
 
-## Configuración de Variables de Entorno y Seguridad de API
+## Tech Stack
 
-### 1. Configurar `EXPO_PUBLIC_YOUTUBE_API_KEY`
-
-1. Crea un proyecto en [Google Cloud Console](https://console.cloud.google.com/).
-2. Habilita la **YouTube Data API v3**.
-3. Crea una credencial de tipo **Clave de API (API Key)**.
-4. Copia el archivo `.env.example` a `.env` en la raíz del proyecto:
-   ```bash
-   cp .env.example .env
-   ```
-5. Edita `.env` e introduce tu clave:
-   ```env
-   EXPO_PUBLIC_YOUTUBE_API_KEY=AIzaSyTuClaveRealAqui
-   ```
-
-> **Nota de seguridad**: El archivo `.env` está incluido en `.gitignore` para evitar subir claves al repositorio. En aplicaciones móviles distribuidas públicamente en producción, las variables `EXPO_PUBLIC_*` quedan accesibles en el bundle del cliente; por ello se recomienda:
-> - Restringir la API Key en Google Cloud Console por identificador de paquete iOS (`bundleIdentifier`) / firma SHA-1 de Android (`package`) y limitar su alcance exclusivamente a **YouTube Data API v3**.
-> - O bien, en entornos de alto tráfico, situar un pequeño **backend proxy / Edge Function** intermedio que almacene la clave en el servidor, aplique caché compartida y controle cuotas por IP/usuario.
+- **Framework**: React Native `0.86` + Expo `~57.0` + React `19`
+- **Navigation**: Expo Router (File-based routing + Custom Tab Shell)
+- **Storage**: `@react-native-async-storage/async-storage` (in-memory cache + persistent storage)
+- **Player**: `react-native-webview` + `expo-keep-awake` + Custom Native Module (`DeviceLockModule`)
+- **Testing**: Jest + React Native Testing Library (`@testing-library/react-native`)
 
 ---
 
-## Estructura del Proyecto
+## Getting Started
 
-```text
-src/
-├── app/
-│   ├── _layout.tsx          # Configuración de pestañas (Feed y Buscar) con Expo Router
-│   ├── index.tsx            # Redirección inicial a /feed
-│   ├── feed.tsx             # Pantalla principal del Feed de vídeos
-│   ├── search.tsx           # Pantalla de búsqueda y gestión de canales favoritos
-│   └── player/
-│       └── [id].tsx         # Pantalla del reproductor de vídeo y detalles
-├── components/
-│   ├── ChannelCard.tsx      # Tarjeta de canal con avatar, descripción y botón de favorito
-│   ├── FavoriteButton.tsx   # Botón reutilizable para seguir/dejar de seguir un canal
-│   ├── UIStates.tsx         # Skeletons de carga, EmptyState, ErrorState y OfflineBanner
-│   ├── VideoCard.tsx        # Tarjeta de vídeo con miniatura 16:9, duración y barra de progreso
-│   └── VideoPlayer.tsx      # Reproductor embebido WebView + YouTube IFrame Player API
-├── config/
-│   └── config.ts            # Configuración centralizada (colores, tamaños, intervalos, caché)
-├── hooks/
-│   ├── useChannelSearch.ts  # Búsqueda con debounce y control de errores
-│   ├── useFavorites.ts      # Estado sincronizado de canales favoritos
-│   ├── useFeed.ts           # Carga del Feed con caché local y soporte offline
-│   ├── usePlaybackProgress.ts # Seguimiento y persistencia periódica del minutaje
-│   └── useThemeColors.ts    # Soporte para modo oscuro y claro desde config.ts
-├── services/
-│   ├── storage.ts           # Capa de persistencia local desacoplada sobre AsyncStorage
-│   └── youtube.ts           # Cliente de YouTube Data API v3 con deduplicación y manejo de errores
-├── types/
-│   └── youtube.ts           # Tipos de dominio y respuestas de la API
-├── utils/
-│   ├── debounce.ts          # Utilidad de debounce cancelable
-│   └── format.ts            # Formateo de duraciones ISO 8601, fechas relativas y cálculos de progreso
-└── __tests__/               # Suite de tests unitarios y de integración (Jest + RNTL)
-```
-
----
-
-## Comandos disponibles
+### 1. Install dependencies
 
 ```bash
-# Instalar dependencias
 npm install
-
-# Iniciar el servidor de desarrollo de Expo
-npm start
-
-# Ejecutar tests automatizados
-npm test
-
-# Comprobar tipos con TypeScript
-npm run typecheck
-
-# Generar carpeta nativa android/ (Expo Prebuild)
-npm run prebuild:android
-
-# Generar APK en local (Release) — Requiere JDK 17+ y Android SDK
-npm run apk:local
-
-# Generar APK en local (Debug) — Requiere JDK 17+ y Android SDK
-npm run apk:debug
-
-# Generar APK en la nube con Expo EAS Build
-npm run apk:eas
 ```
 
+### 2. Configure Environment Variables
+
+Copy `.env.example` to `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Set your **YouTube Data API v3** key inside `.env`:
+
+```env
+EXPO_PUBLIC_YOUTUBE_API_KEY=your_youtube_api_key_here
+EAS_SKIP_AUTO_FINGERPRINT=1
+```
+
+> **Note**: Create your key in the [Google Cloud Console](https://console.cloud.google.com/) with **YouTube Data API v3** enabled. For production builds, restrict the key by Android package (`com.youtubefeed.app`) / iOS bundle identifier and API scope.
+
+### 3. Run the app
+
+```bash
+# Start Expo development server
+npm start
+
+# Run on Android / iOS / Web
+npm run android
+npm run ios
+npm run web
+```
+
+---
+
+## Scripts
+
+| Command | Description |
+| :--- | :--- |
+| `npm start` | Start the Expo development server |
+| `npm test` | Run unit and integration tests with Jest |
+| `npm run typecheck` | Run TypeScript type checking (`tsc --noEmit`) |
+| `npm run prebuild:android` | Generate native `android/` project via Expo Prebuild |
+| `npm run apk:debug` | Build a local Debug APK (`android/gradlew assembleDebug`) |
+| `npm run apk:local` | Build a local Release APK (`android/gradlew assembleRelease`) |
+| `npm run apk:eas` | Build an Android APK in the cloud using Expo EAS Build |
+
+---
+
+## Project Structure
+
+```text
+├── plugins/
+│   └── withDeviceLock.js           # Expo config plugin (Android foreground playback & device lock)
+└── src/
+    ├── app/
+    │   ├── _layout.tsx             # Root layout, custom bottom navigation & PersistentPlayerHost
+    │   ├── index.tsx               # Initial redirect to /feed
+    │   ├── feed.tsx                # Main video & Shorts feed screen
+    │   ├── search.tsx              # Channel & video search screen
+    │   ├── history.tsx             # Watch history screen
+    │   ├── config.tsx              # Theme, lock-screen playback & weekly watch stats screen
+    │   └── player/[id].tsx         # Direct video player route
+    ├── components/
+    │   ├── ChannelCard.tsx         # Channel item with avatar, stats, and follow button
+    │   ├── FavoriteButton.tsx      # Reusable follow/unfollow button
+    │   ├── PersistentPlayerHost.tsx# Fullscreen & floating mini-player container + comments
+    │   ├── SplashScreen.tsx        # Animated brand splash screen
+    │   ├── UIStates.tsx            # Skeletons, EmptyState, ErrorState, and OfflineBanner
+    │   ├── VideoCard.tsx           # 16:9 & 9:16 video card with progress bar
+    │   └── VideoPlayer.tsx         # WebView YouTube IFrame Player + Sleep Timer controls
+    ├── config/
+    │   └── config.ts               # Centralized theme, layout, cache, playback & API settings
+    ├── context/
+    │   └── PlayerContext.tsx       # Global active video & mini-player state
+    ├── hooks/                      # Custom hooks (feed, search, favorites, progress, history, timer, comments, theme)
+    ├── services/
+    │   ├── deviceLock.ts           # JS bridge for native Android lock-screen & background service
+    │   ├── storage.ts              # AsyncStorage persistence layer with reactive listeners
+    │   └── youtube.ts              # YouTube Data API v3 client + RSS/web fallback & deduplication
+    ├── types/
+    │   └── youtube.ts              # Domain & API TypeScript interfaces
+    ├── utils/
+    │   ├── debounce.ts             # Cancellable debounce helper
+    │   └── format.ts               # Duration, date, view count & weekly analytics formatters
+    └── __tests__/                  # Jest unit & integration test suites
+```
+
+---
+
+## YouTube API Services Compliance
+
+- **Official Embedded Player**: Playback exclusively uses the official **YouTube IFrame Player API** (`https://www.youtube-nocookie.com`) without blocking or modifying YouTube ads or native attributions.
+- **No Stream Downloading**: The app does not download or store audio/video streams; only channel metadata, watch history, and playback timestamps (`position`, `duration`, `updatedAt`) are stored locally via `AsyncStorage`.
