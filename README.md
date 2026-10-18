@@ -56,13 +56,6 @@ Copy `.env.example` to `.env`:
 cp .env.example .env
 ```
 
-Set your **YouTube Data API v3** key inside `.env`:
-
-```env
-EXPO_PUBLIC_YOUTUBE_API_KEY=your_youtube_api_key_here
-EAS_SKIP_AUTO_FINGERPRINT=1
-```
-
 > **Note**: Create your key in the [Google Cloud Console](https://console.cloud.google.com/) with **YouTube Data API v3** enabled. For production builds, restrict the key by Android package (`com.youtubefeed.app`) / iOS bundle identifier and API scope.
 
 ### 3. Run the app
