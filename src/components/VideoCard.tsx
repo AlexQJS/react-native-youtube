@@ -122,12 +122,14 @@ function VideoCardComponent({
         {/* Etiqueta de duración en la esquina inferior derecha */}
         {durationText ? (
           <View
+            testID={`video-duration-${video.id}`}
             style={[
               styles.durationBadge,
+              hasProgress && styles.durationBadgeWithProgress,
               { backgroundColor: colors.badgeBackground },
             ]}
           >
-            <Text style={[styles.badgeText, { color: colors.badgeText }]}>
+            <Text style={[styles.durationText, { color: colors.badgeText }]}>
               {durationText}
             </Text>
           </View>
@@ -254,11 +256,18 @@ const styles = StyleSheet.create({
   },
   durationBadge: {
     position: 'absolute',
-    bottom: config.theme.spacing.sm + config.theme.sizes.progressBarHeight,
-    right: config.theme.spacing.sm,
-    paddingHorizontal: config.theme.spacing.xs + 2,
-    paddingVertical: config.theme.spacing.xxs,
+    bottom: 6,
+    right: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
     borderRadius: config.theme.radii.xs,
+  },
+  durationBadgeWithProgress: {
+    bottom: config.theme.sizes.progressBarHeight + 4,
+  },
+  durationText: {
+    fontSize: 10,
+    fontWeight: config.theme.typography.fontWeights.semibold,
   },
   badgeText: {
     fontSize: config.theme.typography.fontSizes.xs,

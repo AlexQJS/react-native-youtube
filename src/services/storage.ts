@@ -31,6 +31,7 @@ let memoryFavorites: FavoriteChannel[] | null = null;
 let memoryProgress: PlaybackProgressMap | null = null;
 let memoryHistory: WatchHistoryItem[] | null = null;
 let memoryFeedCache: CacheEntry<VideoItem[]> | null = null;
+let memoryRecommendedFeedCache: CacheEntry<VideoItem[]> | null = null;
 let memoryThemeMode: ThemeMode | null = null;
 let memoryThemeLoaded = false;
 let memoryLockScreenPlayback: boolean | null = null;
@@ -256,6 +257,7 @@ export const storage = {
     memoryProgress = null;
     memoryHistory = null;
     memoryFeedCache = null;
+    memoryRecommendedFeedCache = null;
     memoryThemeMode = null;
     memoryThemeLoaded = false;
     memoryLockScreenPlayback = null;
@@ -957,6 +959,87 @@ export const storage = {
     memoryFeedCache = payload;
     try {
       await AsyncStorage.setItem(config.storageKeys.feedCache, JSON.stringify(payload));
+    } catch {
+      // No bloquear la UI si falla la caché secundaria
+    }
+  },
+
+  /**
+   * Devuelve de forma síncrona la caché del Feed de recomendados en memoria si coincide con la firma.
+   */
+  getSyncRecommendedFeedCache(
+    signature?: string
+  ): { videos: VideoItem[]; updatedAt: number; isStale: boolean } | null {
+    if (!memoryRecommendedFeedCache || !Array.isArray(memoryRecommendedFeedCache.data)) {
+      return null;
+    }
+    if (
+      signature &&
+      memoryRecommendedFeedCache.key &&
+      memoryRecommendedFeedCache.key !== signature
+    ) {
+      return null;
+    }
+    const ageMs = Date.now() - memoryRecommendedFeedCache.updatedAt;
+    const isStale = ageMs > config.cache.recommendedFeedTtlMs;
+    return {
+      videos: [...memoryRecommendedFeedCache.data],
+      updatedAt: memoryRecommendedFeedCache.updatedAt,
+      isStale,
+    };
+  },
+
+  /**
+   * Obtiene la caché local del Feed de recomendados.
+   */
+  async getRecommendedFeedCache(
+    signature?: string
+  ): Promise<{ videos: VideoItem[]; updatedAt: number; isStale: boolean } | null> {
+    try {
+      const raw = await AsyncStorage.getItem(config.storageKeys.recommendedFeedCache);
+      if (!raw) {
+        return null;
+      }
+
+      const parsed = JSON.parse(raw) as CacheEntry<VideoItem[]>;
+      if (!parsed || !Array.isArray(parsed.data) || typeof parsed.updatedAt !== 'number') {
+        return null;
+      }
+
+      memoryRecommendedFeedCache = parsed;
+
+      if (signature && parsed.key && parsed.key !== signature) {
+        return null;
+      }
+
+      const ageMs = Date.now() - parsed.updatedAt;
+      const isStale = ageMs > config.cache.recommendedFeedTtlMs;
+
+      return {
+        videos: parsed.data,
+        updatedAt: parsed.updatedAt,
+        isStale,
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Guarda en caché local los vídeos recomendados junto con su firma de intereses.
+   */
+  async saveRecommendedFeedCache(videos: VideoItem[], signature?: string): Promise<void> {
+    const payload: CacheEntry<VideoItem[]> = {
+      data: videos,
+      updatedAt: Date.now(),
+      key: signature,
+    };
+    memoryRecommendedFeedCache = payload;
+    try {
+      await AsyncStorage.setItem(
+        config.storageKeys.recommendedFeedCache,
+        JSON.stringify(payload)
+      );
     } catch {
       // No bloquear la UI si falla la caché secundaria
     }

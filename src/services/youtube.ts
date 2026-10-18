@@ -1,8 +1,11 @@
 import { config } from '../config/config';
+import { storage } from './storage';
 import {
   FavoriteChannel,
+  PlaybackProgressMap,
   VideoComment,
   VideoItem,
+  WatchHistoryItem,
   YouTubeAppError,
   YouTubeCommentsListResponse,
   YouTubeCommentThreadsResponse,
@@ -474,6 +477,20 @@ function parseRssXmlEntries(
         ? parsedViews
         : undefined;
 
+    const durationMatch = entryXml.match(/duration=["'](\d+)["']/i);
+    const ytDurationMatch = entryXml.match(/<yt:duration[^>]*seconds=["'](\d+)["']/i);
+    const parsedDuration = ytDurationMatch
+      ? Number(ytDurationMatch[1])
+      : durationMatch
+        ? Number(durationMatch[1])
+        : undefined;
+    const durationSeconds =
+      parsedDuration !== undefined && Number.isFinite(parsedDuration) && parsedDuration > 0
+        ? Math.floor(parsedDuration)
+        : undefined;
+    const durationFormatted =
+      durationSeconds !== undefined ? formatDuration(durationSeconds) : undefined;
+
     if (!videoId || !title) {
       continue;
     }
@@ -484,6 +501,7 @@ function parseRssXmlEntries(
         : detectIsShort({
             title,
             description,
+            durationSeconds,
             linkHref,
           });
 
@@ -495,6 +513,8 @@ function parseRssXmlEntries(
       channelId: channel.id,
       channelTitle: authorName,
       publishedAt,
+      ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+      ...(durationFormatted ? { durationFormatted } : {}),
       ...(isShort ? { isShort: true } : {}),
       ...(viewCount !== undefined ? { viewCount } : {}),
     });
@@ -602,6 +622,206 @@ export async function fetchChannelVideosFromRss(
   )}`;
   const xml = await fetchRssText(defaultUrl);
   return parseRssXmlEntries(xml, channel);
+}
+
+/**
+ * Obtiene los vídeos más populares de YouTube mediante la API Key oficial.
+ */
+async function fetchPopularVideosWithKey(apiKey: string): Promise<VideoItem[]> {
+  const params = new URLSearchParams({
+    part: 'snippet,contentDetails,statistics',
+    chart: 'mostPopular',
+    maxResults: String(config.feed.maxVideos),
+    key: apiKey,
+  });
+
+  const url = `${config.api.baseUrl}/videos?${params.toString()}`;
+  const data = await fetchYouTubeJson<YouTubeVideosResponse>(url);
+  const items = data.items ?? [];
+  const videos: VideoItem[] = [];
+
+  for (const item of items) {
+    const id = item.id ?? '';
+    const rawTitle = item.snippet?.title ?? '';
+    const title = decodeHtmlEntities(rawTitle).trim();
+    if (!id || !title) continue;
+
+    const thumbnail = normalizeThumbnailUrl(
+      item.snippet?.thumbnails?.high?.url ??
+        item.snippet?.thumbnails?.medium?.url ??
+        item.snippet?.thumbnails?.default?.url ??
+        `https://i.ytimg.com/vi/${id}/hqdefault.jpg`
+    );
+    const channelId = item.snippet?.channelId ?? '';
+    const channelTitle = decodeHtmlEntities(item.snippet?.channelTitle ?? '').trim();
+    const publishedAt = item.snippet?.publishedAt ?? '';
+    const rawDesc = item.snippet?.description;
+    const description = rawDesc ? decodeHtmlEntities(rawDesc).trim() : undefined;
+
+    const durationSeconds = parseIsoDuration(item.contentDetails?.duration);
+    const durationFormatted =
+      durationSeconds !== undefined ? formatDuration(durationSeconds) : undefined;
+    const rawViews = item.statistics?.viewCount ? Number(item.statistics.viewCount) : undefined;
+    const viewCount = rawViews !== undefined && Number.isFinite(rawViews) ? rawViews : undefined;
+
+    const isShort = detectIsShort({
+      title,
+      description,
+      durationSeconds,
+    });
+
+    videos.push({
+      id,
+      title,
+      thumbnail,
+      channelId,
+      channelTitle,
+      publishedAt,
+      ...(description ? { description } : {}),
+      ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+      ...(durationFormatted ? { durationFormatted } : {}),
+      ...(viewCount !== undefined ? { viewCount } : {}),
+      ...(isShort ? { isShort: true } : {}),
+    });
+  }
+
+  return videos;
+}
+
+/**
+ * Obtiene la duración sin API key para vídeos de YouTube utilizando InnerTube (/player)
+ * con timeout de seguridad y manejo de errores.
+ */
+async function fetchVideoDurationWithoutKey(videoId: string): Promise<number | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3500);
+
+  try {
+    const response = await fetch('https://www.youtube.com/youtubei/v1/player', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'WEB',
+            clientVersion: '2.20241001.00.00',
+            hl: 'es',
+          },
+        },
+        videoId,
+      }),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data: any = await response.json();
+    const rawSeconds = data?.videoDetails?.lengthSeconds;
+    const seconds = rawSeconds ? Number(rawSeconds) : NaN;
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return Math.floor(seconds);
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Enriquece un lote de vídeos con sus duraciones cuando no se dispone de API Key:
+ * 1. Lee del progreso local de reproducción o caché existente si ya se conoce.
+ * 2. Para los restantes, consulta en paralelo el endpoint público /player de InnerTube.
+ */
+async function enrichVideosWithoutKey(videos: VideoItem[]): Promise<VideoItem[]> {
+  if (!videos.length) {
+    return [];
+  }
+
+  const needsDuration = videos.filter(
+    (v) => !v.durationSeconds && !v.durationFormatted
+  );
+
+  if (needsDuration.length === 0) {
+    return videos;
+  }
+
+  const durationMap = new Map<
+    string,
+    { durationSeconds: number; durationFormatted: string }
+  >();
+
+  // 1. Enriquecer primero desde el progreso de reproducción local guardado
+  try {
+    const progressMap: PlaybackProgressMap = await storage.getPlaybackProgress();
+    for (const v of needsDuration) {
+      const prog = progressMap[v.id];
+      if (prog?.duration && prog.duration > 0) {
+        durationMap.set(v.id, {
+          durationSeconds: prog.duration,
+          durationFormatted: formatDuration(prog.duration),
+        });
+      }
+    }
+  } catch {
+    // Ignorar si storage no está disponible
+  }
+
+  // 2. Comprobar si existen detalles en caché individual
+  for (const v of needsDuration) {
+    if (durationMap.has(v.id)) continue;
+    try {
+      const cached = await storage.getCachedVideo(v.id);
+      if (cached?.durationSeconds && cached.durationSeconds > 0) {
+        durationMap.set(v.id, {
+          durationSeconds: cached.durationSeconds,
+          durationFormatted:
+            cached.durationFormatted || formatDuration(cached.durationSeconds),
+        });
+      }
+    } catch {
+      // Ignorar errores de lectura de caché individual
+    }
+  }
+
+  // 3. Para los vídeos que todavía no tienen duración, consultar /player
+  const stillMissing = needsDuration
+    .filter((v) => !durationMap.has(v.id))
+    .slice(0, 20);
+
+  if (stillMissing.length > 0) {
+    await Promise.allSettled(
+      stillMissing.map(async (v) => {
+        const seconds = await fetchVideoDurationWithoutKey(v.id);
+        if (seconds && seconds > 0) {
+          durationMap.set(v.id, {
+            durationSeconds: seconds,
+            durationFormatted: formatDuration(seconds),
+          });
+        }
+      })
+    );
+  }
+
+  if (durationMap.size === 0) {
+    return videos;
+  }
+
+  return videos.map((video) => {
+    const details = durationMap.get(video.id);
+    if (!details) return video;
+    return {
+      ...video,
+      durationSeconds: details.durationSeconds,
+      durationFormatted: details.durationFormatted,
+    };
+  });
 }
 
 export const youtubeService = {
@@ -915,7 +1135,7 @@ export const youtubeService = {
 
   /**
    * Obtiene detalles adicionales (como la duración ISO 8601) para un lote de IDs de vídeo
-   * cuando se dispone de API Key.
+   * cuando se dispone de API Key, o utiliza el modo sin clave enriquecido.
    */
   async enrichVideosWithDetails(
     videos: VideoItem[],
@@ -927,7 +1147,7 @@ export const youtubeService = {
 
     const apiKey = getActiveApiKey(apiKeyOverride);
     if (!apiKey) {
-      return videos;
+      return await enrichVideosWithoutKey(videos);
     }
 
     const ids = videos.map((v) => v.id).slice(0, 50);
@@ -996,7 +1216,7 @@ export const youtubeService = {
           };
         });
     } catch {
-      return videos;
+      return await enrichVideosWithoutKey(videos);
     }
   },
 
@@ -1088,6 +1308,194 @@ export const youtubeService = {
         });
 
         return await this.enrichVideosWithDetails(merged, apiKeyOverride);
+      } finally {
+        inFlightRequests.delete(requestKey);
+      }
+    })();
+
+    inFlightRequests.set(requestKey, requestPromise);
+    return requestPromise;
+  },
+
+  /**
+   * Obtiene vídeos recomendados que puedan gustar al usuario ("Feed"),
+   * utilizando los intereses de sus canales favoritos e historial de reproducción,
+   * o las principales tendencias y contenidos populares en YouTube.
+   */
+  async getRecommendedVideos(options?: {
+    favorites?: FavoriteChannel[];
+    history?: WatchHistoryItem[];
+    apiKeyOverride?: string;
+  }): Promise<VideoItem[]> {
+    const apiKey = getActiveApiKey(options?.apiKeyOverride);
+    const favorites = options?.favorites ?? [];
+    const history = options?.history ?? [];
+
+    const favSig = favorites.slice(0, 3).map((f) => f.id).sort().join(',');
+    const histSig = history.slice(0, 3).map((h) => h.video.id).sort().join(',');
+    const requestKey = `recommended:${apiKey ? 'api' : 'nokey'}:${favSig}|${histSig}`;
+
+    const existing = inFlightRequests.get(requestKey);
+    if (existing) {
+      return existing;
+    }
+
+    const requestPromise = (async () => {
+      try {
+        const queryCandidates: string[] = [];
+
+        // 1. Extraer temáticas del historial (palabras clave en lugar de sólo el nombre del canal)
+        for (const item of history.slice(0, 4)) {
+          const stopWords = new Set([
+            'para', 'como', 'este', 'esta', 'estos', 'estas', 'todos', 'todo', 'sobre',
+            'with', 'from', 'this', 'that', 'what', 'when', 'where', 'how', 'video',
+            'nuevo', 'nueva', '2025', '2026', '2024', 'parte', 'part', 'full', 'gratis'
+          ]);
+          const words = item.video.title
+            .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+            .split(/\s+/)
+            .map((w) => w.toLowerCase().trim())
+            .filter((w) => w.length > 3 && !stopWords.has(w));
+
+          if (words.length >= 2) {
+            const topic = words.slice(0, 2).join(' ');
+            if (!queryCandidates.includes(topic)) {
+              queryCandidates.push(topic);
+            }
+          } else if (words.length === 1 && !queryCandidates.includes(words[0])) {
+            queryCandidates.push(words[0]);
+          }
+
+          if (item.video.channelTitle && !queryCandidates.includes(item.video.channelTitle)) {
+            queryCandidates.push(item.video.channelTitle);
+          }
+        }
+
+        // 2. Extraer temas de canales favoritos
+        for (const channel of favorites.slice(0, 3)) {
+          if (channel.name && !queryCandidates.includes(channel.name)) {
+            queryCandidates.push(channel.name);
+          }
+        }
+
+        // 3. Consultas variadas de descubrimiento para garantizar diversidad y nuevos canales
+        const discoveryQueries = [
+          'tendencias',
+          'podcast tecnologia',
+          'ciencia y curiosidades',
+          'resumen documentales',
+          'noticias tecnologia',
+          'mejores momentos',
+        ];
+
+        for (const disc of discoveryQueries) {
+          if (!queryCandidates.includes(disc)) {
+            queryCandidates.push(disc);
+          }
+          if (queryCandidates.length >= 5) break;
+        }
+
+        // Ejecutar búsquedas para hasta 4 consultas diferentes en paralelo
+        const selectedQueries = queryCandidates.slice(0, 4);
+        const searchPromises: Promise<VideoItem[]>[] = selectedQueries.map((q) =>
+          this.searchVideos(q, options?.apiKeyOverride).catch(() => [])
+        );
+
+        if (apiKey) {
+          searchPromises.push(fetchPopularVideosWithKey(apiKey).catch(() => []));
+        }
+
+        const queryResults = await Promise.allSettled(searchPromises);
+
+        // Intercalar (round-robin) resultados de cada búsqueda en lugar de concatenar en bloque
+        const resultBuckets: VideoItem[][] = [];
+        for (const res of queryResults) {
+          if (res.status === 'fulfilled' && Array.isArray(res.value) && res.value.length > 0) {
+            resultBuckets.push(res.value);
+          }
+        }
+
+        const interleaved: VideoItem[] = [];
+        let maxBucketLen = 0;
+        for (const bucket of resultBuckets) {
+          if (bucket.length > maxBucketLen) maxBucketLen = bucket.length;
+        }
+
+        for (let i = 0; i < maxBucketLen; i++) {
+          for (const bucket of resultBuckets) {
+            if (i < bucket.length) {
+              interleaved.push(bucket[i]);
+            }
+          }
+        }
+
+        // Deduplicar por ID y aplicar límite de vídeos por canal (máx 2 por canal)
+        // para garantizar que ningún creador monopolice la pestaña de recomendaciones
+        const MAX_PER_CHANNEL = 2;
+        const channelCounts = new Map<string, number>();
+        const seenIds = new Set<string>();
+        const diverseVideos: VideoItem[] = [];
+
+        const completedIds = new Set(
+          history.filter((h) => h.completed).map((h) => h.video.id)
+        );
+
+        for (const video of interleaved) {
+          if (!video?.id || seenIds.has(video.id) || completedIds.has(video.id)) {
+            continue;
+          }
+
+          const channelKey = (video.channelId || video.channelTitle || '').trim().toLowerCase();
+          const currentCount = channelCounts.get(channelKey) ?? 0;
+
+          if (channelKey && currentCount >= MAX_PER_CHANNEL) {
+            continue; // Saltar para dar paso a vídeos de otros canales
+          }
+
+          seenIds.add(video.id);
+          if (channelKey) {
+            channelCounts.set(channelKey, currentCount + 1);
+          }
+          diverseVideos.push(video);
+        }
+
+        // Si no se obtuvo ningún vídeo (por ejemplo, todos estaban completados en historial),
+        // permitir los vídeos manteniendo siempre el límite por canal
+        if (diverseVideos.length === 0) {
+          for (const video of interleaved) {
+            if (!video?.id || seenIds.has(video.id)) {
+              continue;
+            }
+            const channelKey = (video.channelId || video.channelTitle || '').trim().toLowerCase();
+            const currentCount = channelCounts.get(channelKey) ?? 0;
+            if (channelKey && currentCount >= MAX_PER_CHANNEL) {
+              continue;
+            }
+            seenIds.add(video.id);
+            if (channelKey) {
+              channelCounts.set(channelKey, currentCount + 1);
+            }
+            diverseVideos.push(video);
+          }
+        }
+
+        // Separar vídeos normales y Shorts
+        const normalVideos = diverseVideos
+          .filter((v) => !v.isShort)
+          .slice(0, config.feed.maxVideos);
+        const shortVideos = diverseVideos
+          .filter((v) => Boolean(v.isShort))
+          .slice(0, config.feed.maxVideos);
+
+        // Mezclar alternando para un feed rico y diverso
+        const merged: VideoItem[] = [];
+        const maxLen = Math.max(normalVideos.length, shortVideos.length);
+        for (let i = 0; i < maxLen; i++) {
+          if (i < normalVideos.length) merged.push(normalVideos[i]);
+          if (i < shortVideos.length) merged.push(shortVideos[i]);
+        }
+
+        return merged.slice(0, config.feed.maxVideos * 2);
       } finally {
         inFlightRequests.delete(requestKey);
       }

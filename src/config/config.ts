@@ -215,6 +215,8 @@ export const config = {
   cache: {
     /** Duración de la caché del Feed en milisegundos (10 minutos) */
     feedTtlMs: 10 * 60 * 1000,
+    /** Duración de la caché del Feed de recomendados en milisegundos (10 minutos) */
+    recommendedFeedTtlMs: 10 * 60 * 1000,
     /** Duración de la caché de detalles de vídeos en milisegundos (30 minutos) */
     videoDetailsTtlMs: 30 * 60 * 1000,
     /** Duración de la caché de canales en milisegundos (60 minutos) */
@@ -235,6 +237,7 @@ export const config = {
     playbackProgress: '@yt_feed/playbackProgress',
     watchHistory: '@yt_feed/watchHistory',
     feedCache: '@yt_feed/feedCache_v3',
+    recommendedFeedCache: '@yt_feed/recommendedFeedCache_v2',
     videoDetailsCache: '@yt_feed/videoDetailsCache_v3',
     customApiKey: '@yt_feed/customApiKey',
     themeMode: '@yt_feed/themeMode',

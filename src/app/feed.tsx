@@ -22,7 +22,9 @@ import { usePlayer } from '../context/PlayerContext';
 import { useFavorites } from '../hooks/useFavorites';
 import { useFeed } from '../hooks/useFeed';
 import { usePlaybackProgress } from '../hooks/usePlaybackProgress';
+import { useRecommendedFeed } from '../hooks/useRecommendedFeed';
 import { useThemeColors } from '../hooks/useThemeColors';
+import { useWatchHistory } from '../hooks/useWatchHistory';
 import { FavoriteChannel, VideoItem } from '../types/youtube';
 
 export default function FeedScreen() {
@@ -30,6 +32,13 @@ export default function FeedScreen() {
   const { colors } = useThemeColors();
   const { openVideo, activeVideo, isMinimized } = usePlayer();
   const { favorites, loading: favoritesLoading } = useFavorites();
+  const { history } = useWatchHistory();
+  const { getProgress } = usePlaybackProgress();
+
+  // Top Tabs: "Following" (active by default) and "Feed" (recommended videos)
+  const [mainTab, setMainTab] = useState<'following' | 'feed'>('following');
+
+  // Following feed hook
   const {
     videos,
     loading: feedLoading,
@@ -39,13 +48,29 @@ export default function FeedScreen() {
     lastUpdatedAt,
     refresh,
   } = useFeed(favorites, favoritesLoading);
-  const { getProgress } = usePlaybackProgress();
 
+  // Recommended feed hook
+  const {
+    videos: recommendedVideos,
+    loading: recommendedLoading,
+    refreshing: recommendedRefreshing,
+    error: recommendedError,
+    isOfflineData: recommendedIsOffline,
+    lastUpdatedAt: recommendedLastUpdatedAt,
+    refresh: refreshRecommended,
+  } = useRecommendedFeed(favorites, history);
+
+  // Filters for Following tab
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [feedMode, setFeedMode] = useState<'videos' | 'shorts'>('videos');
 
+  // Filters for Recommended Feed tab
+  const [recommendedFeedMode, setRecommendedFeedMode] = useState<'videos' | 'shorts'>('videos');
+
   const shortsFilterEnabled = config.feed.enableShortsFilter;
   const showShortsOnly = shortsFilterEnabled && feedMode === 'shorts';
+  const showRecommendedShortsOnly =
+    shortsFilterEnabled && recommendedFeedMode === 'shorts';
 
   const filteredVideos = useMemo(() => {
     return videos.filter((video) => {
@@ -57,13 +82,22 @@ export default function FeedScreen() {
         if (feedMode === 'shorts') {
           return Boolean(video.isShort);
         }
-        // En la pestaña principal ("Todos") solo se muestran vídeos normales (no Shorts)
         return !video.isShort;
       }
 
       return true;
     });
   }, [videos, selectedChannelId, shortsFilterEnabled, feedMode]);
+
+  const filteredRecommendedVideos = useMemo(() => {
+    if (!shortsFilterEnabled) {
+      return recommendedVideos;
+    }
+    if (recommendedFeedMode === 'shorts') {
+      return recommendedVideos.filter((video) => Boolean(video.isShort));
+    }
+    return recommendedVideos.filter((video) => !video.isShort);
+  }, [recommendedVideos, shortsFilterEnabled, recommendedFeedMode]);
 
   const handleOpenVideo = useCallback(
     (video: VideoItem) => {
@@ -86,6 +120,18 @@ export default function FeedScreen() {
       />
     ),
     [getProgress, handleOpenVideo, showShortsOnly]
+  );
+
+  const renderRecommendedVideoItem = useCallback(
+    ({ item }: ListRenderItemInfo<VideoItem>) => (
+      <VideoCard
+        video={item}
+        progress={getProgress(item.id)}
+        onPress={handleOpenVideo}
+        compact={showRecommendedShortsOnly}
+      />
+    ),
+    [getProgress, handleOpenVideo, showRecommendedShortsOnly]
   );
 
   const keyExtractor = useCallback((item: VideoItem) => item.id, []);
@@ -138,7 +184,7 @@ export default function FeedScreen() {
               renderItem={renderChannelChip}
               ListHeaderComponent={
                 <View style={styles.leadingChipsRow}>
-                  {/* Pestaña/Filtro "Todos" -> Muestra solo vídeos normales */}
+                  {/* Pestaña/Filtro "Todos" */}
                   <Pressable
                     testID="feed-channel-chip-all"
                     onPress={() => {
@@ -171,7 +217,7 @@ export default function FeedScreen() {
                     </Text>
                   </Pressable>
 
-                  {/* Pestaña/Filtro "Shorts" -> Muestra solo Shorts (configurable desde config.feed.enableShortsFilter) */}
+                  {/* Pestaña/Filtro "Shorts" */}
                   {shortsFilterEnabled && (
                     <Pressable
                       testID="feed-channel-chip-shorts"
@@ -196,7 +242,9 @@ export default function FeedScreen() {
                       <Ionicons
                         name="flash"
                         size={config.theme.sizes.iconSm - 3}
-                        color={isShortsSelected ? colors.badgeText : colors.primary}
+                        color={
+                          isShortsSelected ? colors.badgeText : colors.primary
+                        }
                       />
                       <Text
                         style={[
@@ -236,23 +284,121 @@ export default function FeedScreen() {
     shortsFilterEnabled,
   ]);
 
-  if (feedLoading && videos.length === 0) {
+  const isRecommendedTodosSelected = recommendedFeedMode === 'videos';
+  const isRecommendedShortsSelected = recommendedFeedMode === 'shorts';
+
+  const renderRecommendedHeader = useCallback(() => {
     return (
-      <View
-        style={[styles.screen, { backgroundColor: colors.background }]}
-      >
+      <View>
+        {shortsFilterEnabled && (
+          <View style={styles.channelsBar}>
+            <View style={styles.leadingChipsRow}>
+              <Pressable
+                testID="recommended-chip-all"
+                onPress={() => setRecommendedFeedMode('videos')}
+                style={[
+                  styles.channelChip,
+                  {
+                    backgroundColor: isRecommendedTodosSelected
+                      ? colors.primary
+                      : colors.surfaceElevated,
+                    borderColor: isRecommendedTodosSelected
+                      ? colors.primary
+                      : colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.channelChipText,
+                    {
+                      color: isRecommendedTodosSelected
+                        ? colors.badgeText
+                        : colors.text,
+                    },
+                  ]}
+                >
+                  Todos
+                </Text>
+              </Pressable>
+
+              <Pressable
+                testID="recommended-chip-shorts"
+                onPress={() => {
+                  setRecommendedFeedMode((prev) =>
+                    prev === 'shorts' ? 'videos' : 'shorts'
+                  );
+                }}
+                style={[
+                  styles.channelChip,
+                  styles.shortsChip,
+                  {
+                    backgroundColor: isRecommendedShortsSelected
+                      ? colors.primary
+                      : colors.surfaceElevated,
+                    borderColor: isRecommendedShortsSelected
+                      ? colors.primary
+                      : colors.border,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="flash"
+                  size={config.theme.sizes.iconSm - 3}
+                  color={
+                    isRecommendedShortsSelected
+                      ? colors.badgeText
+                      : colors.primary
+                  }
+                />
+                <Text
+                  style={[
+                    styles.channelChipText,
+                    {
+                      color: isRecommendedShortsSelected
+                        ? colors.badgeText
+                        : colors.text,
+                    },
+                  ]}
+                >
+                  Shorts
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        {recommendedIsOffline && (
+          <OfflineBanner
+            lastUpdatedAt={recommendedLastUpdatedAt}
+            onRetry={refreshRecommended}
+          />
+        )}
+      </View>
+    );
+  }, [
+    colors,
+    isRecommendedShortsSelected,
+    isRecommendedTodosSelected,
+    recommendedIsOffline,
+    recommendedLastUpdatedAt,
+    refreshRecommended,
+    shortsFilterEnabled,
+  ]);
+
+  const hasMiniPlayer = Boolean(activeVideo && isMinimized);
+
+  const renderFollowingContent = () => {
+    if (feedLoading && videos.length === 0) {
+      return (
         <View style={styles.contentPadding}>
           <VideoFeedSkeleton count={3} />
         </View>
-      </View>
-    );
-  }
+      );
+    }
 
-  if (favorites.length === 0) {
-    return (
-      <View
-        style={[styles.screen, { backgroundColor: colors.background }]}
-      >
+    if (favorites.length === 0) {
+      return (
         <EmptyState
           testID="feed-empty-favorites"
           icon="tv-outline"
@@ -261,28 +407,20 @@ export default function FeedScreen() {
           actionLabel="Buscar canales"
           onAction={handleGoToSearch}
         />
-      </View>
-    );
-  }
+      );
+    }
 
-  if (error && videos.length === 0) {
-    return (
-      <View
-        style={[styles.screen, { backgroundColor: colors.background }]}
-      >
+    if (error && videos.length === 0) {
+      return (
         <ErrorState
           testID="feed-error-state"
           message={error.message}
           onRetry={refresh}
         />
-      </View>
-    );
-  }
+      );
+    }
 
-  const hasMiniPlayer = Boolean(activeVideo && isMinimized);
-
-  return (
-    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+    return (
       <FlatList
         key={showShortsOnly ? 'feed-shorts-2col' : 'feed-videos-1col'}
         testID="feed-video-list"
@@ -330,12 +468,213 @@ export default function FeedScreen() {
         windowSize={7}
         removeClippedSubviews
       />
+    );
+  };
+
+  const renderRecommendedContent = () => {
+    if (recommendedLoading && recommendedVideos.length === 0) {
+      return (
+        <View style={styles.contentPadding}>
+          <VideoFeedSkeleton count={3} />
+        </View>
+      );
+    }
+
+    if (recommendedError && recommendedVideos.length === 0) {
+      return (
+        <ErrorState
+          testID="recommended-error-state"
+          message={recommendedError.message}
+          onRetry={refreshRecommended}
+        />
+      );
+    }
+
+    return (
+      <FlatList
+        key={
+          showRecommendedShortsOnly
+            ? 'recommended-shorts-2col'
+            : 'recommended-videos-1col'
+        }
+        testID="recommended-video-list"
+        data={filteredRecommendedVideos}
+        numColumns={
+          showRecommendedShortsOnly ? config.feed.shortsColumns : 1
+        }
+        columnWrapperStyle={
+          showRecommendedShortsOnly ? styles.shortsColumnWrapper : undefined
+        }
+        keyExtractor={keyExtractor}
+        renderItem={renderRecommendedVideoItem}
+        ListHeaderComponent={renderRecommendedHeader}
+        ListEmptyComponent={
+          <EmptyState
+            testID="recommended-no-videos"
+            icon={
+              showRecommendedShortsOnly
+                ? 'flash-outline'
+                : 'sparkles-outline'
+            }
+            title={
+              showRecommendedShortsOnly
+                ? 'No hay Shorts recomendados'
+                : 'No hay vídeos recomendados'
+            }
+            description="Desliza hacia abajo o pulsa actualizar para descubrir nuevos contenidos recomendados para ti."
+            actionLabel="Actualizar"
+            onAction={refreshRecommended}
+          />
+        }
+        contentContainerStyle={[
+          styles.listContent,
+          hasMiniPlayer && styles.listContentWithMiniPlayer,
+          filteredRecommendedVideos.length === 0 && styles.listContentEmpty,
+        ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={recommendedRefreshing}
+            onRefresh={refreshRecommended}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+        initialNumToRender={6}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews
+      />
+    );
+  };
+
+  return (
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+      {/* Top Tabs: "Following" and "Feed" */}
+      <View
+        style={[
+          styles.topTabsBar,
+          {
+            backgroundColor: colors.surface,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
+        <Pressable
+          testID="feed-tab-following"
+          accessibilityRole="tab"
+          accessibilityState={{ selected: mainTab === 'following' }}
+          onPress={() => setMainTab('following')}
+          style={[
+            styles.topTabButton,
+            mainTab === 'following' && styles.topTabButtonActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.topTabTitle,
+              {
+                color:
+                  mainTab === 'following'
+                    ? colors.primary
+                    : colors.textSecondary,
+                fontWeight:
+                  mainTab === 'following'
+                    ? config.theme.typography.fontWeights.bold
+                    : config.theme.typography.fontWeights.medium,
+              },
+            ]}
+          >
+            Following
+          </Text>
+          {mainTab === 'following' && (
+            <View
+              testID="feed-tab-indicator-following"
+              style={[
+                styles.topTabIndicator,
+                { backgroundColor: colors.primary },
+              ]}
+            />
+          )}
+        </Pressable>
+
+        <Pressable
+          testID="feed-tab-feed"
+          accessibilityRole="tab"
+          accessibilityState={{ selected: mainTab === 'feed' }}
+          onPress={() => setMainTab('feed')}
+          style={[
+            styles.topTabButton,
+            mainTab === 'feed' && styles.topTabButtonActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.topTabTitle,
+              {
+                color:
+                  mainTab === 'feed' ? colors.primary : colors.textSecondary,
+                fontWeight:
+                  mainTab === 'feed'
+                    ? config.theme.typography.fontWeights.bold
+                    : config.theme.typography.fontWeights.medium,
+              },
+            ]}
+          >
+            Feed
+          </Text>
+          {mainTab === 'feed' && (
+            <View
+              testID="feed-tab-indicator-feed"
+              style={[
+                styles.topTabIndicator,
+                { backgroundColor: colors.primary },
+              ]}
+            />
+          )}
+        </Pressable>
+      </View>
+
+      <View style={styles.tabContentContainer}>
+        {mainTab === 'following'
+          ? renderFollowingContent()
+          : renderRecommendedContent()}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
+    flex: 1,
+  },
+  topTabsBar: {
+    flexDirection: 'row',
+    borderBottomWidth: config.theme.sizes.borderWidth,
+    paddingHorizontal: config.theme.spacing.lg,
+    zIndex: 10,
+  },
+  topTabButton: {
+    paddingVertical: config.theme.spacing.md - 2,
+    paddingHorizontal: config.theme.spacing.md,
+    marginRight: config.theme.spacing.sm,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topTabButtonActive: {},
+  topTabTitle: {
+    fontSize: config.theme.typography.fontSizes.md,
+  },
+  topTabIndicator: {
+    position: 'absolute',
+    bottom: -config.theme.sizes.borderWidth,
+    left: config.theme.spacing.sm,
+    right: config.theme.spacing.sm,
+    height: 3,
+    borderTopLeftRadius: 3,
+    borderTopRightRadius: 3,
+  },
+  tabContentContainer: {
     flex: 1,
   },
   contentPadding: {
