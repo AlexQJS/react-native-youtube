@@ -11,12 +11,15 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { config } from '../config/config';
 import { usePlayer } from '../context/PlayerContext';
+import { useFavorites } from '../hooks/useFavorites';
 import { usePlaybackProgress } from '../hooks/usePlaybackProgress';
 import { useThemeColors } from '../hooks/useThemeColors';
 import { useVideoComments } from '../hooks/useVideoComments';
 import { storage } from '../services/storage';
+import { youtubeService } from '../services/youtube';
 import { VideoItem } from '../types/youtube';
 import {
   detectIsShort,
@@ -31,9 +34,13 @@ export interface PersistentPlayerHostProps {
   bottomOffset?: number;
 }
 
+const channelAvatarMemoryCache = new Map<string, string>();
+
 export function PersistentPlayerHost({
   bottomOffset = config.theme.sizes.tabBarHeight + config.theme.spacing.md,
 }: PersistentPlayerHostProps) {
+  const router = useRouter();
+  const { favorites, isFavorite, toggleFavorite } = useFavorites();
   const { activeVideo, isMinimized, minimizeVideo, expandVideo, closeVideo } =
     usePlayer();
   const { colors } = useThemeColors();
@@ -70,14 +77,13 @@ export function PersistentPlayerHost({
   useEffect(() => {
     let mounted = true;
     setIsDescriptionExpanded(false);
+    setCachedDetails(null);
     if (videoId) {
       storage.getCachedVideo(videoId).then((cached) => {
         if (mounted) {
           setCachedDetails(cached);
         }
       });
-    } else {
-      setCachedDetails(null);
     }
     return () => {
       mounted = false;
@@ -120,13 +126,150 @@ export function PersistentPlayerHost({
     };
   }, [activeVideo, isMinimized, handleMinimize]);
 
+  const channelTitle =
+    activeVideo?.channelTitle || cachedDetails?.channelTitle || '';
+  const effectiveChannelId =
+    activeVideo?.channelId || cachedDetails?.channelId || '';
+  const isChannelFav = effectiveChannelId ? isFavorite(effectiveChannelId) : false;
+
+  const [channelAvatar, setChannelAvatar] = useState<string>(() => {
+    return (
+      activeVideo?.channelThumbnail ||
+      cachedDetails?.channelThumbnail ||
+      (effectiveChannelId && channelAvatarMemoryCache.get(effectiveChannelId)) ||
+      (channelTitle && channelAvatarMemoryCache.get(channelTitle)) ||
+      ''
+    );
+  });
+  const [avatarError, setAvatarError] = useState<boolean>(false);
+
+  useEffect(() => {
+    let mounted = true;
+    setAvatarError(false);
+
+    const directThumb =
+      activeVideo?.channelThumbnail || cachedDetails?.channelThumbnail;
+    if (directThumb) {
+      setChannelAvatar(directThumb);
+      if (effectiveChannelId) {
+        channelAvatarMemoryCache.set(effectiveChannelId, directThumb);
+      }
+      if (channelTitle) {
+        channelAvatarMemoryCache.set(channelTitle, directThumb);
+      }
+      return;
+    }
+
+    const cached =
+      (effectiveChannelId && channelAvatarMemoryCache.get(effectiveChannelId)) ||
+      (channelTitle && channelAvatarMemoryCache.get(channelTitle));
+    if (cached) {
+      setChannelAvatar(cached);
+      return;
+    }
+
+    const favChannel = effectiveChannelId
+      ? favorites.find((f) => f.id === effectiveChannelId && f.thumbnail)
+      : favorites.find((f) => f.name === channelTitle && f.thumbnail);
+    if (favChannel?.thumbnail) {
+      setChannelAvatar(favChannel.thumbnail);
+      if (effectiveChannelId) {
+        channelAvatarMemoryCache.set(effectiveChannelId, favChannel.thumbnail);
+      }
+      return;
+    }
+
+    if (effectiveChannelId) {
+      youtubeService
+        .getChannelDetails(effectiveChannelId)
+        .then((details) => {
+          if (mounted && details?.thumbnail) {
+            setChannelAvatar(details.thumbnail);
+            channelAvatarMemoryCache.set(effectiveChannelId, details.thumbnail);
+            if (channelTitle) {
+              channelAvatarMemoryCache.set(channelTitle, details.thumbnail);
+            }
+          }
+        })
+        .catch(() => {});
+    } else if (channelTitle) {
+      youtubeService
+        .searchChannels(channelTitle)
+        .then((channels) => {
+          if (mounted && channels.length > 0 && channels[0].thumbnail) {
+            setChannelAvatar(channels[0].thumbnail);
+            channelAvatarMemoryCache.set(channelTitle, channels[0].thumbnail);
+            if (channels[0].id) {
+              channelAvatarMemoryCache.set(channels[0].id, channels[0].thumbnail);
+            }
+          }
+        })
+        .catch(() => {});
+    } else {
+      setChannelAvatar('');
+    }
+
+    return () => {
+      mounted = false;
+    };
+  }, [
+    activeVideo?.channelThumbnail,
+    cachedDetails?.channelThumbnail,
+    channelTitle,
+    effectiveChannelId,
+    favorites,
+  ]);
+
+  const handleOpenChannel = useCallback(async () => {
+    let targetChannelId = effectiveChannelId;
+    if (!targetChannelId && channelTitle) {
+      try {
+        const found = await youtubeService.searchChannels(channelTitle);
+        if (found.length > 0) {
+          targetChannelId = found[0].id;
+        }
+      } catch {
+        // Ignorar fallo de búsqueda
+      }
+    }
+    if (targetChannelId) {
+      minimizeVideo();
+      router.push({
+        pathname: `/channel/${targetChannelId}`,
+        params: {
+          name: channelTitle,
+          thumbnail: channelAvatar || undefined,
+        },
+      });
+    }
+  }, [channelAvatar, channelTitle, effectiveChannelId, minimizeVideo, router]);
+
+  const handleToggleFavoriteChannel = useCallback(async () => {
+    let targetChannelId = effectiveChannelId;
+    if (!targetChannelId && channelTitle) {
+      try {
+        const found = await youtubeService.searchChannels(channelTitle);
+        if (found.length > 0) {
+          targetChannelId = found[0].id;
+        }
+      } catch {
+        // Ignorar fallo de búsqueda
+      }
+    }
+    if (targetChannelId) {
+      toggleFavorite({
+        id: targetChannelId,
+        name: channelTitle,
+        thumbnail: channelAvatar || '',
+      });
+    }
+  }, [channelAvatar, channelTitle, effectiveChannelId, toggleFavorite]);
+
   if (!activeVideo) {
     return null;
   }
 
   const title = activeVideo.title || cachedDetails?.title || 'Reproduciendo vídeo';
-  const channelTitle =
-    activeVideo.channelTitle || cachedDetails?.channelTitle || '';
   const publishedAt =
     activeVideo.publishedAt || cachedDetails?.publishedAt || '';
   const description =
@@ -215,12 +358,23 @@ export function PersistentPlayerHost({
             </Text>
           </Pressable>
 
-          <Text
-            numberOfLines={1}
-            style={[styles.headerChannelTitle, { color: colors.textSecondary }]}
+          <Pressable
+            testID="player-header-channel-button"
+            accessibilityRole="button"
+            accessibilityLabel={`Ver canal ${channelTitle || config.app.name}`}
+            onPress={handleOpenChannel}
+            hitSlop={6}
+            style={({ pressed }) => [
+              { opacity: pressed ? 0.7 : 1 },
+            ]}
           >
-            {channelTitle || config.app.name}
-          </Text>
+            <Text
+              numberOfLines={1}
+              style={[styles.headerChannelTitle, { color: colors.textSecondary }]}
+            >
+              {channelTitle || config.app.name}
+            </Text>
+          </Pressable>
 
           <Pressable
             testID="player-close-button"
@@ -313,27 +467,19 @@ export function PersistentPlayerHost({
           </Text>
 
           <View style={styles.metaRow}>
-            {channelTitle ? (
-              <Text
-                style={[styles.channelName, { color: colors.textSecondary }]}
-              >
-                {channelTitle}
-              </Text>
-            ) : null}
             {viewsLabel ? (
-              <>
-                <Text style={[styles.dot, { color: colors.textMuted }]}>•</Text>
-                <Text
-                  testID="player-view-count"
-                  style={[styles.publishedDate, { color: colors.textMuted }]}
-                >
-                  {viewsLabel}
-                </Text>
-              </>
+              <Text
+                testID="player-view-count"
+                style={[styles.publishedDate, { color: colors.textMuted }]}
+              >
+                {viewsLabel}
+              </Text>
             ) : null}
             {publishedAt ? (
               <>
-                <Text style={[styles.dot, { color: colors.textMuted }]}>•</Text>
+                {viewsLabel ? (
+                  <Text style={[styles.dot, { color: colors.textMuted }]}>•</Text>
+                ) : null}
                 <Text
                   style={[styles.publishedDate, { color: colors.textMuted }]}
                 >
@@ -342,6 +488,106 @@ export function PersistentPlayerHost({
               </>
             ) : null}
           </View>
+
+          {/* Fila del canal con acceso al perfil */}
+          {channelTitle ? (
+            <View
+              testID="player-channel-card"
+              style={[
+                styles.channelCardRow,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Pressable
+                testID="player-channel-link"
+                accessibilityRole="button"
+                accessibilityLabel={`Ver perfil del canal ${channelTitle}`}
+                onPress={handleOpenChannel}
+                style={styles.channelLinkLeft}
+              >
+                <View
+                  style={[
+                    styles.playerChannelAvatar,
+                    { backgroundColor: colors.surfaceElevated },
+                  ]}
+                >
+                  {channelAvatar && !avatarError ? (
+                    <Image
+                      testID="player-channel-avatar-image"
+                      source={{ uri: channelAvatar }}
+                      style={styles.playerChannelAvatarImage}
+                      onError={() => setAvatarError(true)}
+                    />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.playerChannelInitial,
+                        { color: colors.text },
+                      ]}
+                    >
+                      {channelTitle.charAt(0).toUpperCase()}
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.channelLinkTextContainer}>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.channelCardTitle, { color: colors.text }]}
+                  >
+                    {channelTitle}
+                  </Text>
+                  <Text
+                    style={[styles.channelCardSubtitle, { color: colors.textSecondary }]}
+                  >
+                    Ver perfil del canal
+                  </Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={config.theme.sizes.iconSm}
+                  color={colors.textSecondary}
+                />
+              </Pressable>
+
+              <Pressable
+                testID="player-channel-favorite-button"
+                accessibilityRole="button"
+                accessibilityLabel={
+                  isChannelFav ? 'Siguiendo este canal' : 'Seguir este canal'
+                }
+                onPress={handleToggleFavoriteChannel}
+                hitSlop={6}
+                style={({ pressed }) => [
+                  styles.channelFollowButton,
+                  {
+                    backgroundColor: isChannelFav
+                      ? colors.surfaceElevated
+                      : colors.primary,
+                    borderColor: isChannelFav ? colors.border : colors.primary,
+                    opacity: pressed ? 0.8 : 1,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={isChannelFav ? 'checkmark-circle' : 'heart-outline'}
+                  size={config.theme.sizes.iconSm}
+                  color={isChannelFav ? colors.primary : colors.badgeText}
+                />
+                <Text
+                  style={[
+                    styles.channelFollowButtonText,
+                    { color: isChannelFav ? colors.text : colors.badgeText },
+                  ]}
+                >
+                  {isChannelFav ? 'Siguiendo' : 'Seguir'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           {description ? (
             <View
@@ -977,6 +1223,63 @@ const styles = StyleSheet.create({
   },
   channelName: {
     fontSize: config.theme.typography.fontSizes.sm,
+    fontWeight: config.theme.typography.fontWeights.semibold,
+  },
+  channelCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: config.theme.spacing.sm,
+    paddingHorizontal: config.theme.spacing.md,
+    borderRadius: config.theme.radii.sm,
+    borderWidth: config.theme.sizes.borderWidth,
+    marginTop: config.theme.spacing.xs,
+    gap: config.theme.spacing.sm,
+  },
+  channelLinkLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: config.theme.spacing.sm,
+  },
+  playerChannelAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: config.theme.radii.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  playerChannelAvatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: config.theme.radii.full,
+  },
+  playerChannelInitial: {
+    fontSize: config.theme.typography.fontSizes.md,
+    fontWeight: config.theme.typography.fontWeights.bold,
+  },
+  channelLinkTextContainer: {
+    flex: 1,
+  },
+  channelCardTitle: {
+    fontSize: config.theme.typography.fontSizes.sm,
+    fontWeight: config.theme.typography.fontWeights.bold,
+  },
+  channelCardSubtitle: {
+    fontSize: config.theme.typography.fontSizes.xs,
+  },
+  channelFollowButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: config.theme.spacing.xxs,
+    paddingHorizontal: config.theme.spacing.sm,
+    paddingVertical: config.theme.spacing.xs,
+    borderRadius: config.theme.radii.full,
+    borderWidth: config.theme.sizes.borderWidth,
+  },
+  channelFollowButtonText: {
+    fontSize: config.theme.typography.fontSizes.xs,
     fontWeight: config.theme.typography.fontWeights.semibold,
   },
   dot: {

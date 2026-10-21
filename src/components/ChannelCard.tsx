@@ -1,5 +1,5 @@
 import React, { memo, useState } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { config } from '../config/config';
 import { useThemeColors } from '../hooks/useThemeColors';
 import { FavoriteChannel } from '../types/youtube';
@@ -9,12 +9,14 @@ export interface ChannelCardProps {
   channel: FavoriteChannel;
   isFavorite: boolean;
   onToggleFavorite: (channel: FavoriteChannel) => void;
+  onPress?: (channel: FavoriteChannel) => void;
 }
 
 function ChannelCardComponent({
   channel,
   isFavorite,
   onToggleFavorite,
+  onPress,
 }: ChannelCardProps) {
   const { colors } = useThemeColors();
   const [imageError, setImageError] = useState(false);
@@ -23,13 +25,17 @@ function ChannelCardComponent({
   const showImage = Boolean(channel.thumbnail && !imageError);
 
   return (
-    <View
+    <Pressable
       testID={`channel-card-${channel.id}`}
-      style={[
+      accessibilityRole="button"
+      accessibilityLabel={`Ver canal ${channel.name}`}
+      onPress={() => onPress?.(channel)}
+      style={({ pressed }) => [
         styles.container,
         {
           backgroundColor: colors.surface,
           borderColor: colors.border,
+          opacity: pressed && onPress ? 0.9 : 1,
         },
       ]}
     >
@@ -106,7 +112,7 @@ function ChannelCardComponent({
         isFavorite={isFavorite}
         onPress={() => onToggleFavorite(channel)}
       />
-    </View>
+    </Pressable>
   );
 }
 

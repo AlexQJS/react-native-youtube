@@ -18,6 +18,8 @@ export interface VideoCardProps {
   onPress: (video: VideoItem) => void;
   /** Modo compacto en cuadrícula de 2 columnas (usado en la pestaña Shorts) */
   compact?: boolean;
+  /** Callback opcional al pulsar en el nombre del canal para navegar a su perfil */
+  onPressChannel?: (channelId: string, channelTitle?: string) => void;
 }
 
 function VideoCardComponent({
@@ -25,6 +27,7 @@ function VideoCardComponent({
   progress,
   onPress,
   compact = false,
+  onPressChannel,
 }: VideoCardProps) {
   const { colors } = useThemeColors();
   const [imageError, setImageError] = useState(false);
@@ -175,12 +178,33 @@ function VideoCardComponent({
         </Text>
 
         <View style={styles.metaRow}>
-          <Text
-            numberOfLines={1}
-            style={[styles.channelName, { color: colors.textSecondary }]}
-          >
-            {video.channelTitle}
-          </Text>
+          {onPressChannel && video.channelId ? (
+            <Pressable
+              testID={`video-channel-pressable-${video.id}`}
+              accessibilityRole="button"
+              accessibilityLabel={`Ver canal ${video.channelTitle}`}
+              onPress={(e) => {
+                // @ts-ignore
+                e?.stopPropagation?.();
+                onPressChannel(video.channelId, video.channelTitle);
+              }}
+              hitSlop={6}
+            >
+              <Text
+                numberOfLines={1}
+                style={[styles.channelName, { color: colors.textSecondary }]}
+              >
+                {video.channelTitle}
+              </Text>
+            </Pressable>
+          ) : (
+            <Text
+              numberOfLines={1}
+              style={[styles.channelName, { color: colors.textSecondary }]}
+            >
+              {video.channelTitle}
+            </Text>
+          )}
 
           {viewsText ? (
             <>

@@ -33,9 +33,11 @@ describe('SplashScreen Component', () => {
     const { unmount } = render(<SplashScreen onFinish={onFinish} />);
 
     act(() => {
-      jest.advanceTimersByTime(
-        config.splash.durationMs + config.splash.fadeOutDurationMs + 100
-      );
+      jest.advanceTimersByTime(config.splash.durationMs + 50);
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(config.splash.fadeOutDurationMs + 50);
     });
 
     expect(onFinish).toHaveBeenCalledTimes(1);
@@ -49,9 +51,7 @@ describe('SplashScreen Component', () => {
     );
 
     act(() => {
-      jest.advanceTimersByTime(
-        config.splash.durationMs + config.splash.fadeOutDurationMs + 500
-      );
+      jest.advanceTimersByTime(config.splash.durationMs + 50);
     });
 
     // No debe ocultarse hasta que isReady sea true
@@ -60,7 +60,7 @@ describe('SplashScreen Component', () => {
     rerender(<SplashScreen isReady={true} onFinish={onFinish} />);
 
     act(() => {
-      jest.advanceTimersByTime(config.splash.fadeOutDurationMs + 100);
+      jest.advanceTimersByTime(config.splash.fadeOutDurationMs + 50);
     });
 
     expect(onFinish).toHaveBeenCalledTimes(1);

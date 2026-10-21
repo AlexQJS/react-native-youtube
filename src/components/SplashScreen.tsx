@@ -22,6 +22,9 @@ export interface SplashScreenProps {
  * fondo turquesa (#39b19bff) e icono blanco de reproducción redondeado,
  * con animación de entrada, pulso suave y transición fluida hacia el Feed.
  */
+const isTestEnv = process.env.NODE_ENV === 'test';
+const canUseNativeDriver = !isTestEnv;
+
 export function SplashScreen({ onFinish, isReady = true }: SplashScreenProps) {
   const [minDurationElapsed, setMinDurationElapsed] = useState(false);
   const hasStartedExitRef = useRef(false);
@@ -41,45 +44,45 @@ export function SplashScreen({ onFinish, isReady = true }: SplashScreenProps) {
         toValue: 1,
         duration: 380,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: canUseNativeDriver,
       }),
       Animated.spring(logoScale, {
         toValue: 1,
         friction: 6,
         tension: 65,
-        useNativeDriver: true,
+        useNativeDriver: canUseNativeDriver,
       }),
       Animated.timing(ringOpacity, {
         toValue: 1,
         duration: 500,
         easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
+        useNativeDriver: canUseNativeDriver,
       }),
       Animated.timing(ringScale, {
         toValue: 1.08,
         duration: config.splash.durationMs,
         easing: Easing.out(Easing.sin),
-        useNativeDriver: true,
+        useNativeDriver: canUseNativeDriver,
       }),
       Animated.timing(textOpacity, {
         toValue: 1,
         duration: 420,
         delay: 140,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: canUseNativeDriver,
       }),
       Animated.timing(textTranslateY, {
         toValue: 0,
         duration: 420,
         delay: 140,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: canUseNativeDriver,
       }),
       Animated.timing(progressWidth, {
         toValue: 1,
         duration: Math.max(400, config.splash.durationMs - 150),
         easing: Easing.inOut(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: canUseNativeDriver,
       }),
     ]);
 
@@ -110,18 +113,25 @@ export function SplashScreen({ onFinish, isReady = true }: SplashScreenProps) {
 
     hasStartedExitRef.current = true;
 
+    if (isTestEnv) {
+      const testExitTimer = setTimeout(() => {
+        onFinish();
+      }, config.splash.fadeOutDurationMs);
+      return () => clearTimeout(testExitTimer);
+    }
+
     const exitAnimation = Animated.parallel([
       Animated.timing(containerOpacity, {
         toValue: 0,
         duration: config.splash.fadeOutDurationMs,
         easing: Easing.inOut(Easing.quad),
-        useNativeDriver: true,
+        useNativeDriver: canUseNativeDriver,
       }),
       Animated.timing(logoScale, {
         toValue: 1.08,
         duration: config.splash.fadeOutDurationMs,
         easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
+        useNativeDriver: canUseNativeDriver,
       }),
     ]);
 

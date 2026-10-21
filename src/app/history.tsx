@@ -3,6 +3,7 @@ import {
   FlatList,
   Image,
   ListRenderItemInfo,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -28,12 +29,14 @@ interface HistoryCardProps {
   item: WatchHistoryItem;
   onPress: (item: WatchHistoryItem) => void;
   onRemove: (videoId: string) => void;
+  onPressChannel?: (channelId: string, channelTitle?: string) => void;
 }
 
 const HistoryCard = memo(function HistoryCardComponent({
   item,
   onPress,
   onRemove,
+  onPressChannel,
 }: HistoryCardProps) {
   const { colors } = useThemeColors();
   const [imageError, setImageError] = useState(false);
@@ -151,12 +154,33 @@ const HistoryCard = memo(function HistoryCardComponent({
           {video.title}
         </Text>
 
-        <Text
-          numberOfLines={1}
-          style={[styles.channelText, { color: colors.textSecondary }]}
-        >
-          {video.channelTitle || 'Canal de YouTube'}
-        </Text>
+        {onPressChannel && video.channelId ? (
+          <Pressable
+            testID={`history-channel-${video.id}`}
+            accessibilityRole="button"
+            accessibilityLabel={`Ver canal ${video.channelTitle}`}
+            onPress={(e) => {
+              // @ts-ignore
+              e?.stopPropagation?.();
+              onPressChannel(video.channelId, video.channelTitle);
+            }}
+            hitSlop={6}
+          >
+            <Text
+              numberOfLines={1}
+              style={[styles.channelText, { color: colors.textSecondary }]}
+            >
+              {video.channelTitle || 'Canal de YouTube'}
+            </Text>
+          </Pressable>
+        ) : (
+          <Text
+            numberOfLines={1}
+            style={[styles.channelText, { color: colors.textSecondary }]}
+          >
+            {video.channelTitle || 'Canal de YouTube'}
+          </Text>
+        )}
 
         {viewsText ? (
           <Text
@@ -233,15 +257,28 @@ export default function HistoryScreen() {
     [openVideo]
   );
 
+  const handleOpenChannel = useCallback(
+    (channelId: string, channelTitle?: string) => {
+      router.push({
+        pathname: `/channel/${channelId}`,
+        params: {
+          name: channelTitle || '',
+        },
+      });
+    },
+    [router]
+  );
+
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<WatchHistoryItem>) => (
       <HistoryCard
         item={item}
         onPress={handleOpenHistoryItem}
         onRemove={removeItem}
+        onPressChannel={handleOpenChannel}
       />
     ),
-    [handleOpenHistoryItem, removeItem]
+    [handleOpenChannel, handleOpenHistoryItem, removeItem]
   );
 
   const keyExtractor = useCallback(
@@ -321,10 +358,11 @@ export default function HistoryScreen() {
           hasMiniPlayer && styles.listContentWithMiniPlayer,
           history.length === 0 && styles.listContentEmpty,
         ]}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
-        windowSize={7}
-        removeClippedSubviews
+        initialNumToRender={5}
+        maxToRenderPerBatch={5}
+        windowSize={5}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews={Platform.OS !== 'web'}
       />
     </View>
   );

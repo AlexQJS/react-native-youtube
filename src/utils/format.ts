@@ -212,6 +212,41 @@ export function formatViewCount(views?: number): string {
 }
 
 /**
+ * Formatea el número de suscriptores de un canal (p.ej. "1,2 M suscriptores", "45 K suscriptores").
+ */
+export function formatSubscriberCount(count?: number | string): string {
+  if (count === undefined || count === null || count === '') {
+    return '';
+  }
+
+  const num = typeof count === 'string' ? parseInt(count, 10) : count;
+  if (!Number.isFinite(num) || num < 0) {
+    return '';
+  }
+
+  if (num === 1) {
+    return '1 suscriptor';
+  }
+
+  if (num < 1000) {
+    return `${num} suscriptores`;
+  }
+
+  if (num < 1_000_000) {
+    const thousands = num / 1000;
+    const formatted =
+      thousands >= 100
+        ? Math.round(thousands).toString()
+        : thousands.toFixed(1).replace('.0', '').replace('.', ',');
+    return `${formatted} K suscriptores`;
+  }
+
+  const millions = num / 1_000_000;
+  const formatted = millions.toFixed(1).replace('.0', '').replace('.', ',');
+  return `${formatted} M suscriptores`;
+}
+
+/**
  * Convierte un texto de duración "MM:SS" o "HH:MM:SS" a segundos totales.
  */
 export function parseDurationTextToSeconds(text?: string): number | undefined {

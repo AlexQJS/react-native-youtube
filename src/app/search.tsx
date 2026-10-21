@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import {
   FlatList,
   ListRenderItemInfo,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ChannelCard } from '../components/ChannelCard';
 import { VideoCard } from '../components/VideoCard';
@@ -28,6 +30,7 @@ import { FavoriteChannel, VideoItem } from '../types/youtube';
 type SearchTabFilter = 'all' | 'videos' | 'channels';
 
 export default function SearchScreen() {
+  const router = useRouter();
   const { colors } = useThemeColors();
   const { openVideo, activeVideo, isMinimized } = usePlayer();
   const { favorites, isFavorite, toggleFavorite } = useFavorites();
@@ -57,6 +60,32 @@ export default function SearchScreen() {
     [toggleFavorite]
   );
 
+  const handleOpenChannel = useCallback(
+    (channel: FavoriteChannel) => {
+      router.push({
+        pathname: `/channel/${channel.id}`,
+        params: {
+          name: channel.name,
+          thumbnail: channel.thumbnail,
+          description: channel.description || '',
+        },
+      });
+    },
+    [router]
+  );
+
+  const handleOpenChannelFromVideo = useCallback(
+    (channelId: string, channelTitle?: string) => {
+      router.push({
+        pathname: `/channel/${channelId}`,
+        params: {
+          name: channelTitle || '',
+        },
+      });
+    },
+    [router]
+  );
+
   const handleOpenVideo = useCallback(
     (video: VideoItem) => {
       openVideo(video);
@@ -70,9 +99,10 @@ export default function SearchScreen() {
         channel={item}
         isFavorite={isFavorite(item.id)}
         onToggleFavorite={handleToggleFavorite}
+        onPress={handleOpenChannel}
       />
     ),
-    [handleToggleFavorite, isFavorite]
+    [handleOpenChannel, handleToggleFavorite, isFavorite]
   );
 
   const keyExtractor = useCallback((item: FavoriteChannel) => item.id, []);
@@ -177,7 +207,11 @@ export default function SearchScreen() {
             favorites.length === 0 && styles.listContentEmpty,
           ]}
           keyboardShouldPersistTaps="handled"
-          initialNumToRender={10}
+          initialNumToRender={6}
+          maxToRenderPerBatch={6}
+          windowSize={5}
+          updateCellsBatchingPeriod={50}
+          removeClippedSubviews={Platform.OS !== 'web'}
         />
       ) : !hasAnyResults && hasSearched ? (
         <EmptyState
@@ -325,6 +359,7 @@ export default function SearchScreen() {
                   video={video}
                   progress={getProgress(video.id)}
                   onPress={handleOpenVideo}
+                  onPressChannel={handleOpenChannelFromVideo}
                 />
               ))}
             </View>
@@ -353,6 +388,7 @@ export default function SearchScreen() {
                   channel={channel}
                   isFavorite={isFavorite(channel.id)}
                   onToggleFavorite={handleToggleFavorite}
+                  onPress={handleOpenChannel}
                 />
               ))}
             </View>

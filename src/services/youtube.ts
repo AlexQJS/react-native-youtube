@@ -1,15 +1,19 @@
 import { config } from '../config/config';
 import { storage } from './storage';
 import {
+  ChannelDetails,
+  ChannelPlaylist,
   FavoriteChannel,
   PlaybackProgressMap,
   VideoComment,
   VideoItem,
   WatchHistoryItem,
   YouTubeAppError,
+  YouTubeChannelsResponse,
   YouTubeCommentsListResponse,
   YouTubeCommentThreadsResponse,
   YouTubePlaylistItemsResponse,
+  YouTubePlaylistsResponse,
   YouTubeSearchResponse,
   YouTubeVideosResponse,
 } from '../types/youtube';
@@ -17,6 +21,7 @@ import {
   decodeHtmlEntities,
   detectIsShort,
   formatDuration,
+  formatSubscriberCount,
   parseDurationTextToSeconds,
   parseIsoDuration,
   parseViewCountText,
@@ -410,12 +415,23 @@ async function searchVideosWithoutKey(query: string): Promise<VideoItem[]> {
         linkHref: navUrl,
       });
 
+      const channelThumbList =
+        renderer.channelThumbnailSupportedRenderers
+          ?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails ?? [];
+      const bestChannelThumb =
+        channelThumbList[channelThumbList.length - 1]?.url ??
+        channelThumbList[0]?.url;
+      const channelThumbnail = bestChannelThumb
+        ? normalizeThumbnailUrl(bestChannelThumb)
+        : undefined;
+
       videos.push({
         id,
         title,
         thumbnail,
         channelId,
         channelTitle,
+        ...(channelThumbnail ? { channelThumbnail } : {}),
         publishedAt,
         ...(description ? { description } : {}),
         ...(durationSeconds !== undefined ? { durationSeconds } : {}),
@@ -512,6 +528,7 @@ function parseRssXmlEntries(
       thumbnail,
       channelId: channel.id,
       channelTitle: authorName,
+      ...(channel.thumbnail ? { channelThumbnail: channel.thumbnail } : {}),
       publishedAt,
       ...(durationSeconds !== undefined ? { durationSeconds } : {}),
       ...(durationFormatted ? { durationFormatted } : {}),
@@ -822,6 +839,450 @@ async function enrichVideosWithoutKey(videos: VideoItem[]): Promise<VideoItem[]>
       durationFormatted: details.durationFormatted,
     };
   });
+}
+
+const INNER_TUBE_CLIENT_CONTEXT = {
+  client: {
+    clientName: 'WEB',
+    clientVersion: '2.20241001.00.00',
+    hl: 'es',
+  },
+};
+
+/**
+ * Consulta la información y perfil de un canal mediante YouTube Data API v3.
+ */
+async function fetchChannelDetailsFromApi(
+  channelId: string,
+  apiKey: string
+): Promise<ChannelDetails | null> {
+  const params = new URLSearchParams({
+    part: 'snippet,contentDetails,statistics,brandingSettings',
+    id: channelId,
+    key: apiKey,
+  });
+
+  const url = `${config.api.baseUrl}/channels?${params.toString()}`;
+  const data = await fetchYouTubeJson<YouTubeChannelsResponse>(url);
+  const item = data.items?.[0];
+  if (!item) return null;
+
+  const title = decodeHtmlEntities(item.snippet?.title ?? '').trim();
+  const handle = item.snippet?.customUrl ? decodeHtmlEntities(item.snippet.customUrl) : undefined;
+  const thumbnail = normalizeThumbnailUrl(
+    item.snippet?.thumbnails?.high?.url ??
+      item.snippet?.thumbnails?.medium?.url ??
+      item.snippet?.thumbnails?.default?.url ??
+      ''
+  );
+  const bannerUrl = normalizeThumbnailUrl(item.brandingSettings?.image?.bannerExternalUrl);
+  const description = item.snippet?.description
+    ? decodeHtmlEntities(item.snippet.description).trim()
+    : undefined;
+  const subscriberCountText = item.statistics?.subscriberCount
+    ? formatSubscriberCount(item.statistics.subscriberCount)
+    : undefined;
+  const videoCountText = item.statistics?.videoCount
+    ? `${Number(item.statistics.videoCount).toLocaleString()} vídeos`
+    : undefined;
+  const viewCountText = item.statistics?.viewCount
+    ? `${Number(item.statistics.viewCount).toLocaleString()} visualizaciones`
+    : undefined;
+
+  return {
+    id: channelId,
+    name: title,
+    handle,
+    thumbnail,
+    bannerUrl: bannerUrl || undefined,
+    description,
+    subscriberCountText,
+    videoCountText,
+    viewCountText,
+    publishedAt: item.snippet?.publishedAt,
+    country: item.snippet?.country,
+    uploadsPlaylistId: item.contentDetails?.relatedPlaylists?.uploads,
+  };
+}
+
+/**
+ * Consulta la información del canal sin API key a través del endpoint público InnerTube (/browse).
+ */
+async function fetchChannelDetailsFromInnerTube(
+  channelId: string
+): Promise<ChannelDetails | null> {
+  let response: Response;
+  try {
+    response = await fetch('https://www.youtube.com/youtubei/v1/browse?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        context: INNER_TUBE_CLIENT_CONTEXT,
+        browseId: channelId,
+      }),
+    });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data: any = await response.json();
+  const phr = data?.header?.pageHeaderRenderer;
+  const c4 = data?.header?.c4TabbedHeaderRenderer;
+  const vm = phr?.content?.pageHeaderViewModel;
+
+  const rawTitle = vm?.title?.dynamicTextViewModel?.text?.content || c4?.title || '';
+  const title = decodeHtmlEntities(rawTitle).trim();
+  if (!title) {
+    return null;
+  }
+
+  const avatar = normalizeThumbnailUrl(
+    vm?.image?.decoratedAvatarViewModel?.avatar?.avatarViewModel?.image?.sources?.slice(-1)[0]?.url ||
+      c4?.avatar?.thumbnails?.slice(-1)[0]?.url ||
+      ''
+  );
+  const banner = normalizeThumbnailUrl(
+    vm?.banner?.imageBannerViewModel?.image?.sources?.slice(-1)[0]?.url ||
+      c4?.banner?.thumbnails?.slice(-1)[0]?.url ||
+      ''
+  );
+
+  let handle: string | undefined;
+  let subscriberCountText: string | undefined = c4?.subscriberCountText?.simpleText;
+  let videoCountText: string | undefined = c4?.videosCountText?.runs?.map((r: any) => r.text).join('');
+
+  const metadataRows = vm?.metadata?.contentMetadataViewModel?.metadataRows || [];
+  for (const row of metadataRows) {
+    for (const part of row.metadataParts || []) {
+      const text = part.text?.content || '';
+      if (text.startsWith('@')) {
+        handle = text;
+      } else if (text.toLowerCase().includes('suscriptor') || text.toLowerCase().includes('subscribers')) {
+        subscriberCountText = text;
+      } else if (
+        text.toLowerCase().includes('vídeo') ||
+        text.toLowerCase().includes('video') ||
+        text.toLowerCase().includes('videos')
+      ) {
+        videoCountText = text;
+      }
+    }
+  }
+
+  const rawDesc =
+    vm?.description?.descriptionPreviewViewModel?.description?.content ||
+    data?.metadata?.channelMetadataRenderer?.description ||
+    '';
+  const description = rawDesc ? decodeHtmlEntities(rawDesc).trim() : undefined;
+
+  return {
+    id: channelId,
+    name: title,
+    handle,
+    thumbnail: avatar,
+    bannerUrl: banner || undefined,
+    description,
+    subscriberCountText,
+    videoCountText,
+  };
+}
+
+/**
+ * Parsea un elemento de vídeo devuelto por InnerTube soportando lockupViewModel y renderers clásicos.
+ */
+function parseInnerTubeGenericVideo(
+  item: any,
+  fallbackChannelId: string,
+  fallbackChannelTitle: string,
+  fallbackChannelThumbnail?: string
+): VideoItem | null {
+  if (!item) return null;
+  const lvm = item.richItemRenderer?.content?.lockupViewModel || item.lockupViewModel;
+  if (lvm) {
+    const videoId =
+      lvm.contentId ||
+      lvm.rendererContext?.commandContext?.onTap?.innertubeCommand?.watchEndpoint?.videoId;
+    if (!videoId || typeof videoId !== 'string') return null;
+
+    const rawTitle = lvm.metadata?.lockupMetadataViewModel?.title?.content || '';
+    const title = decodeHtmlEntities(rawTitle).trim();
+    if (!title) return null;
+
+    const thumbnail = normalizeThumbnailUrl(
+      lvm.contentImage?.thumbnailViewModel?.image?.sources?.slice(-1)[0]?.url ||
+        lvm.contentImage?.collectionThumbnailViewModel?.primaryThumbnail?.thumbnailViewModel?.image?.sources?.slice(-1)[0]?.url ||
+        `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+    );
+
+    let viewsText = '';
+    let publishedAt = '';
+    const rows = lvm.metadata?.lockupMetadataViewModel?.metadata?.contentMetadataViewModel?.metadataRows || [];
+    for (const row of rows) {
+      for (const part of row.metadataParts || []) {
+        const text = part.text?.content || '';
+        if (
+          text.includes('visualizaciones') ||
+          text.includes('views') ||
+          text.includes('visitas')
+        ) {
+          viewsText = text;
+        } else if (
+          text.includes('hace') ||
+          text.includes('ago') ||
+          text.includes('Streamed')
+        ) {
+          publishedAt = text;
+        }
+      }
+    }
+
+    const parsedViews = parseViewCountText(viewsText);
+    const isShort = detectIsShort({ title });
+    const channelAvatarUrl =
+      lvm.metadata?.lockupMetadataViewModel?.image?.sources?.slice(-1)[0]?.url;
+    const channelThumbnail = channelAvatarUrl
+      ? normalizeThumbnailUrl(channelAvatarUrl)
+      : fallbackChannelThumbnail;
+
+    return {
+      id: videoId,
+      title,
+      thumbnail,
+      channelId: fallbackChannelId,
+      channelTitle: fallbackChannelTitle,
+      ...(channelThumbnail ? { channelThumbnail } : {}),
+      publishedAt,
+      viewCount: parsedViews,
+      ...(isShort ? { isShort: true } : {}),
+    };
+  }
+
+  const vr =
+    item.richItemRenderer?.content?.videoRenderer ||
+    item.videoRenderer ||
+    item.compactVideoRenderer;
+  if (vr) {
+    const videoId = vr.videoId;
+    if (!videoId) return null;
+    const rawTitle = vr.title?.runs?.[0]?.text || vr.title?.simpleText || '';
+    const title = decodeHtmlEntities(rawTitle).trim();
+    if (!title) return null;
+    const thumbnail = normalizeThumbnailUrl(
+      vr.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+    );
+    const publishedAt = vr.publishedTimeText?.simpleText || '';
+    const viewsText = vr.viewCountText?.simpleText || vr.shortViewCountText?.simpleText || '';
+    const parsedViews = parseViewCountText(viewsText);
+    const durationText = vr.lengthText?.simpleText;
+    const durationSeconds = parseDurationTextToSeconds(durationText);
+    const isShort = detectIsShort({ title, durationSeconds });
+
+    const channelThumbs =
+      vr.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer
+        ?.thumbnail?.thumbnails;
+    const channelThumbnail =
+      (channelThumbs && channelThumbs.length > 0
+        ? normalizeThumbnailUrl(channelThumbs[channelThumbs.length - 1]?.url)
+        : undefined) || fallbackChannelThumbnail;
+
+    return {
+      id: videoId,
+      title,
+      thumbnail,
+      channelId: fallbackChannelId,
+      channelTitle: fallbackChannelTitle,
+      ...(channelThumbnail ? { channelThumbnail } : {}),
+      publishedAt,
+      viewCount: parsedViews,
+      durationSeconds,
+      durationFormatted: durationText,
+      ...(isShort ? { isShort: true } : {}),
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Obtiene los vídeos más populares de un canal sin API key a través de InnerTube.
+ */
+async function fetchChannelPopularVideosFromInnerTube(
+  channelId: string,
+  channelTitle: string,
+  channelThumbnail?: string
+): Promise<VideoItem[]> {
+  let response: Response;
+  try {
+    response = await fetch('https://www.youtube.com/youtubei/v1/browse?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        context: INNER_TUBE_CLIENT_CONTEXT,
+        browseId: channelId,
+        params: 'EgZ2aWRlb3PyBgQKAjoA',
+      }),
+    });
+  } catch {
+    return [];
+  }
+
+  if (!response.ok) return [];
+
+  const data: any = await response.json();
+  const tabs = data?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
+  const selTab = tabs.find(
+    (t: any) => t.tabRenderer?.selected || t.tabRenderer?.title === 'Vídeos' || t.tabRenderer?.title === 'Videos'
+  );
+  const richGrid = selTab?.tabRenderer?.content?.richGridRenderer;
+  const cbvm = richGrid?.header?.chipBarViewModel;
+  const popChip = cbvm?.chips?.find((c: any) => {
+    const txt = c.chipViewModel?.text?.toLowerCase() || '';
+    return txt.includes('popular') || txt.includes('populares');
+  });
+
+  const token = popChip?.chipViewModel?.tapCommand?.innertubeCommand?.continuationCommand?.token;
+  if (token) {
+    try {
+      const res2 = await fetch('https://www.youtube.com/youtubei/v1/browse?prettyPrint=false', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          context: INNER_TUBE_CLIENT_CONTEXT,
+          continuation: token,
+        }),
+      });
+      if (res2.ok) {
+        const data2: any = await res2.json();
+        const videos: VideoItem[] = [];
+        for (const act of data2?.onResponseReceivedActions || []) {
+          const cmd = act.reloadContinuationItemsCommand || act.appendContinuationItemsAction;
+          for (const item of cmd?.continuationItems || []) {
+            const video = parseInnerTubeGenericVideo(item, channelId, channelTitle, channelThumbnail);
+            if (video) videos.push(video);
+          }
+        }
+        if (videos.length > 0) return videos;
+      }
+    } catch {
+      // Continuar con fallback
+    }
+  }
+
+  // Fallback: parsear los contenidos directos del richGrid
+  const fallbackVideos: VideoItem[] = [];
+  for (const item of richGrid?.contents || []) {
+    const video = parseInnerTubeGenericVideo(item, channelId, channelTitle, channelThumbnail);
+    if (video) fallbackVideos.push(video);
+  }
+  return fallbackVideos;
+}
+
+/**
+ * Parsea una lista de reproducción de InnerTube.
+ */
+function parseInnerTubeGenericPlaylist(item: any): ChannelPlaylist | null {
+  if (!item) return null;
+  const lvm = item.lockupViewModel || item.richItemRenderer?.content?.lockupViewModel;
+  if (lvm) {
+    const id =
+      lvm.contentId ||
+      lvm.rendererContext?.commandContext?.onTap?.innertubeCommand?.watchEndpoint?.playlistId;
+    const title = decodeHtmlEntities(lvm.metadata?.lockupMetadataViewModel?.title?.content || '').trim();
+    if (!id || !title) return null;
+
+    const thumbnail = normalizeThumbnailUrl(
+      lvm.contentImage?.collectionThumbnailViewModel?.primaryThumbnail?.thumbnailViewModel?.image?.sources?.slice(-1)[0]?.url ||
+        lvm.contentImage?.thumbnailViewModel?.image?.sources?.slice(-1)[0]?.url ||
+        ''
+    );
+
+    let itemCountText = '';
+    let publishedAt = '';
+    const rows = lvm.metadata?.lockupMetadataViewModel?.metadata?.contentMetadataViewModel?.metadataRows || [];
+    for (const row of rows) {
+      for (const part of row.metadataParts || []) {
+        const text = part.text?.content || '';
+        if (text.includes('vídeo') || text.includes('video') || text.includes('item')) {
+          itemCountText = text;
+        } else if (text.includes('Actualizada') || text.includes('Updated')) {
+          publishedAt = text;
+        }
+      }
+    }
+    const firstVideoId = lvm.rendererContext?.commandContext?.onTap?.innertubeCommand?.watchEndpoint?.videoId;
+    return { id, title, thumbnail, itemCountText, publishedAt, firstVideoId };
+  }
+
+  const gp = item.gridPlaylistRenderer || item.playlistRenderer;
+  if (gp) {
+    const id = gp.playlistId;
+    const title = decodeHtmlEntities(gp.title?.runs?.[0]?.text || gp.title?.simpleText || '').trim();
+    if (!id || !title) return null;
+    const thumbnail = normalizeThumbnailUrl(gp.thumbnail?.thumbnails?.slice(-1)[0]?.url || '');
+    const itemCountText = gp.videoCountShortText?.simpleText || gp.itemCount?.simpleText || '';
+    const firstVideoId = gp.navigationEndpoint?.watchEndpoint?.videoId;
+    return { id, title, thumbnail, itemCountText, firstVideoId };
+  }
+
+  return null;
+}
+
+/**
+ * Obtiene las listas de reproducción de un canal sin API key a través de InnerTube.
+ */
+async function fetchChannelPlaylistsFromInnerTube(
+  channelId: string
+): Promise<ChannelPlaylist[]> {
+  let response: Response;
+  try {
+    response = await fetch('https://www.youtube.com/youtubei/v1/browse?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        context: INNER_TUBE_CLIENT_CONTEXT,
+        browseId: channelId,
+        params: 'EglwbGF5bGlzdHPyBgoKCEIGCgIQaCIA',
+      }),
+    });
+  } catch {
+    return [];
+  }
+
+  if (!response.ok) return [];
+
+  const data: any = await response.json();
+  const tabs = data?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
+  const selTab = tabs.find(
+    (t: any) => t.tabRenderer?.selected || t.tabRenderer?.title === 'Listas' || t.tabRenderer?.title === 'Playlists'
+  );
+  const contents =
+    selTab?.tabRenderer?.content?.sectionListRenderer?.contents ||
+    selTab?.tabRenderer?.content?.richGridRenderer?.contents;
+  const isrContents = contents?.[0]?.itemSectionRenderer?.contents;
+  const items = isrContents?.[0]?.gridRenderer?.items || contents?.[0]?.richGridRenderer?.contents || [];
+
+  const playlists: ChannelPlaylist[] = [];
+  for (const item of items) {
+    const pl = parseInnerTubeGenericPlaylist(item);
+    if (pl) playlists.push(pl);
+  }
+  return playlists;
 }
 
 export const youtubeService = {
@@ -1745,6 +2206,198 @@ export const youtubeService = {
         }
 
         return replies;
+      } finally {
+        inFlightRequests.delete(requestKey);
+      }
+    })();
+
+    inFlightRequests.set(requestKey, requestPromise);
+    return requestPromise;
+  },
+
+  /**
+   * Obtiene los detalles completos del canal (perfil, banner, estadísticas, handle).
+   */
+  async getChannelDetails(
+    channelId: string,
+    apiKeyOverride?: string
+  ): Promise<ChannelDetails | null> {
+    const trimmedId = channelId.trim();
+    if (!trimmedId) return null;
+
+    const apiKey = getActiveApiKey(apiKeyOverride);
+    const requestKey = `channelDetails:${apiKey ? 'api' : 'nokey'}:${trimmedId}`;
+    const existing = inFlightRequests.get(requestKey);
+    if (existing) return existing;
+
+    const requestPromise = (async () => {
+      try {
+        if (apiKey) {
+          try {
+            const apiResult = await fetchChannelDetailsFromApi(trimmedId, apiKey);
+            if (apiResult) return apiResult;
+          } catch {
+            // Fallback a InnerTube si la petición de API falla
+          }
+        }
+        return await fetchChannelDetailsFromInnerTube(trimmedId);
+      } finally {
+        inFlightRequests.delete(requestKey);
+      }
+    })();
+
+    inFlightRequests.set(requestKey, requestPromise);
+    return requestPromise;
+  },
+
+  /**
+   * Obtiene los vídeos más populares de un canal (ordenados por visitas).
+   */
+  async getChannelPopularVideos(
+    channel: FavoriteChannel | { id: string; name?: string; thumbnail?: string },
+    apiKeyOverride?: string
+  ): Promise<VideoItem[]> {
+    const trimmedId = channel.id.trim();
+    if (!trimmedId) return [];
+
+    const apiKey = getActiveApiKey(apiKeyOverride);
+    const requestKey = `channelPopular:${apiKey ? 'api' : 'nokey'}:${trimmedId}`;
+    const existing = inFlightRequests.get(requestKey);
+    if (existing) return existing;
+
+    const requestPromise = (async () => {
+      try {
+        if (apiKey) {
+          try {
+            const params = new URLSearchParams({
+              part: 'snippet',
+              channelId: trimmedId,
+              order: 'viewCount',
+              type: 'video',
+              maxResults: String(config.feed.videosPerChannel || 20),
+              key: apiKey,
+            });
+            const url = `${config.api.baseUrl}/search?${params.toString()}`;
+            const data = await fetchYouTubeJson<YouTubeSearchResponse>(url);
+            const items = data.items ?? [];
+            const rawVideos: VideoItem[] = [];
+            for (const item of items) {
+              const videoId = item.id?.videoId ?? '';
+              const title = decodeHtmlEntities(item.snippet?.title ?? '').trim();
+              if (!videoId || !title || title === 'Private video' || title === 'Deleted video') {
+                continue;
+              }
+              const thumbnail =
+                item.snippet?.thumbnails?.high?.url ??
+                item.snippet?.thumbnails?.medium?.url ??
+                item.snippet?.thumbnails?.default?.url ??
+                '';
+              const description = decodeHtmlEntities(item.snippet?.description ?? '');
+              const isShort = detectIsShort({ title, description });
+              rawVideos.push({
+                id: videoId,
+                title,
+                description,
+                thumbnail,
+                channelId: trimmedId,
+                channelTitle: decodeHtmlEntities(item.snippet?.channelTitle || channel.name || ''),
+                ...(channel.thumbnail ? { channelThumbnail: channel.thumbnail } : {}),
+                publishedAt: item.snippet?.publishedAt ?? '',
+                ...(isShort ? { isShort: true } : {}),
+              });
+            }
+            if (rawVideos.length > 0) {
+              return await this.enrichVideosWithDetails(rawVideos, apiKey);
+            }
+          } catch {
+            // Fallback a InnerTube
+          }
+        }
+
+        const innerTubeVideos = await fetchChannelPopularVideosFromInnerTube(
+          trimmedId,
+          channel.name || '',
+          channel.thumbnail
+        );
+        if (innerTubeVideos.length > 0) {
+          return innerTubeVideos;
+        }
+
+        // Fallback final: obtener los vídeos normales del canal
+        return await this.getChannelVideos(
+          { id: trimmedId, name: channel.name || '', thumbnail: channel.thumbnail || '' },
+          apiKey
+        );
+      } finally {
+        inFlightRequests.delete(requestKey);
+      }
+    })();
+
+    inFlightRequests.set(requestKey, requestPromise);
+    return requestPromise;
+  },
+
+  /**
+   * Obtiene las listas de reproducción públicas del canal.
+   */
+  async getChannelPlaylists(
+    channelId: string,
+    apiKeyOverride?: string
+  ): Promise<ChannelPlaylist[]> {
+    const trimmedId = channelId.trim();
+    if (!trimmedId) return [];
+
+    const apiKey = getActiveApiKey(apiKeyOverride);
+    const requestKey = `channelPlaylists:${apiKey ? 'api' : 'nokey'}:${trimmedId}`;
+    const existing = inFlightRequests.get(requestKey);
+    if (existing) return existing;
+
+    const requestPromise = (async () => {
+      try {
+        if (apiKey) {
+          try {
+            const params = new URLSearchParams({
+              part: 'snippet,contentDetails',
+              channelId: trimmedId,
+              maxResults: '25',
+              key: apiKey,
+            });
+            const url = `${config.api.baseUrl}/playlists?${params.toString()}`;
+            const data = await fetchYouTubeJson<YouTubePlaylistsResponse>(url);
+            const items = data.items ?? [];
+            const playlists: ChannelPlaylist[] = [];
+            for (const item of items) {
+              const id = item.id;
+              const title = decodeHtmlEntities(item.snippet?.title ?? '').trim();
+              if (!id || !title || title === 'Private playlist') continue;
+              const thumbnail = normalizeThumbnailUrl(
+                item.snippet?.thumbnails?.high?.url ??
+                  item.snippet?.thumbnails?.medium?.url ??
+                  item.snippet?.thumbnails?.default?.url ??
+                  ''
+              );
+              const itemCount = item.contentDetails?.itemCount;
+              const itemCountText =
+                typeof itemCount === 'number'
+                  ? itemCount === 1
+                    ? '1 vídeo'
+                    : `${itemCount} vídeos`
+                  : undefined;
+              playlists.push({
+                id,
+                title,
+                thumbnail,
+                itemCountText,
+                publishedAt: item.snippet?.publishedAt,
+              });
+            }
+            if (playlists.length > 0) return playlists;
+          } catch {
+            // Fallback a InnerTube
+          }
+        }
+
+        return await fetchChannelPlaylistsFromInnerTube(trimmedId);
       } finally {
         inFlightRequests.delete(requestKey);
       }

@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   ListRenderItemInfo,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -106,6 +107,18 @@ export default function FeedScreen() {
     [openVideo]
   );
 
+  const handleOpenChannel = useCallback(
+    (channelId: string, channelTitle?: string) => {
+      router.push({
+        pathname: `/channel/${channelId}`,
+        params: {
+          name: channelTitle || '',
+        },
+      });
+    },
+    [router]
+  );
+
   const handleGoToSearch = useCallback(() => {
     router.push('/search');
   }, [router]);
@@ -116,10 +129,11 @@ export default function FeedScreen() {
         video={item}
         progress={getProgress(item.id)}
         onPress={handleOpenVideo}
+        onPressChannel={handleOpenChannel}
         compact={showShortsOnly}
       />
     ),
-    [getProgress, handleOpenVideo, showShortsOnly]
+    [getProgress, handleOpenChannel, handleOpenVideo, showShortsOnly]
   );
 
   const renderRecommendedVideoItem = useCallback(
@@ -128,10 +142,11 @@ export default function FeedScreen() {
         video={item}
         progress={getProgress(item.id)}
         onPress={handleOpenVideo}
+        onPressChannel={handleOpenChannel}
         compact={showRecommendedShortsOnly}
       />
     ),
-    [getProgress, handleOpenVideo, showRecommendedShortsOnly]
+    [getProgress, handleOpenChannel, handleOpenVideo, showRecommendedShortsOnly]
   );
 
   const keyExtractor = useCallback((item: VideoItem) => item.id, []);
@@ -463,10 +478,11 @@ export default function FeedScreen() {
             colors={[colors.primary]}
           />
         }
-        initialNumToRender={6}
-        maxToRenderPerBatch={8}
-        windowSize={7}
-        removeClippedSubviews
+        initialNumToRender={5}
+        maxToRenderPerBatch={5}
+        windowSize={5}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews={Platform.OS !== 'web'}
       />
     );
   };
@@ -539,10 +555,11 @@ export default function FeedScreen() {
             colors={[colors.primary]}
           />
         }
-        initialNumToRender={6}
-        maxToRenderPerBatch={8}
-        windowSize={7}
-        removeClippedSubviews
+        initialNumToRender={5}
+        maxToRenderPerBatch={5}
+        windowSize={5}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews={Platform.OS !== 'web'}
       />
     );
   };

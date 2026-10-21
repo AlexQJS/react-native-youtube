@@ -19,8 +19,14 @@ export interface PlayerContextValue {
 
 const PlayerContext = createContext<PlayerContextValue | undefined>(undefined);
 
-export function PlayerProvider({ children }: { children: React.ReactNode }) {
-  const [activeVideo, setActiveVideo] = useState<VideoItem | null>(null);
+export function PlayerProvider({
+  children,
+  initialVideo = null,
+}: {
+  children: React.ReactNode;
+  initialVideo?: VideoItem | null;
+}) {
+  const [activeVideo, setActiveVideo] = useState<VideoItem | null>(initialVideo);
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
 
   const openVideo = useCallback((video: VideoItem) => {

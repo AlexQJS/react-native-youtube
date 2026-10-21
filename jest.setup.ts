@@ -24,3 +24,21 @@ jest.mock('expo-keep-awake', () => ({
   useKeepAwake: jest.fn(),
 }));
 
+jest.mock('expo-router', () => ({
+  useRouter: () => ({
+    push: jest.fn(),
+    back: jest.fn(),
+    navigate: jest.fn(),
+  }),
+  useLocalSearchParams: () => ({}),
+  usePathname: () => '/',
+  Redirect: () => null,
+  SplashScreen: {
+    preventAutoHideAsync: jest.fn().mockResolvedValue(true),
+    hideAsync: jest.fn().mockResolvedValue(true),
+  },
+  Tabs: Object.assign(({ children }: any) => children, {
+    Screen: () => null,
+  }),
+}));
+

@@ -13,6 +13,32 @@ export interface FavoriteChannel {
   lastWatchedAt?: number;
 }
 
+export interface ChannelDetails {
+  id: string;
+  name: string;
+  handle?: string;
+  thumbnail: string;
+  bannerUrl?: string;
+  description?: string;
+  subscriberCountText?: string;
+  videoCountText?: string;
+  viewCountText?: string;
+  publishedAt?: string;
+  country?: string;
+  uploadsPlaylistId?: string;
+}
+
+export interface ChannelPlaylist {
+  id: string;
+  title: string;
+  thumbnail: string;
+  itemCountText?: string;
+  publishedAt?: string;
+  firstVideoId?: string;
+}
+
+export type ChannelProfileTab = 'videos' | 'popular' | 'playlists' | 'about';
+
 export interface VideoItem {
   id: string;
   title: string;
@@ -20,6 +46,8 @@ export interface VideoItem {
   thumbnail: string;
   channelId: string;
   channelTitle: string;
+  /** Miniatura / foto de perfil del canal del vídeo (cuando esté disponible) */
+  channelThumbnail?: string;
   publishedAt: string;
   /** Duración en segundos (cuando está disponible) */
   durationSeconds?: number;
@@ -110,6 +138,82 @@ export interface YouTubeSearchResponse {
     message?: string;
     errors?: Array<{
       domain?: string;
+      reason?: string;
+      message?: string;
+    }>;
+  };
+}
+
+export interface YouTubeChannelItem {
+  id?: string;
+  snippet?: {
+    title?: string;
+    description?: string;
+    customUrl?: string;
+    publishedAt?: string;
+    country?: string;
+    thumbnails?: {
+      maxres?: { url?: string };
+      standard?: { url?: string };
+      high?: { url?: string };
+      medium?: { url?: string };
+      default?: { url?: string };
+    };
+  };
+  contentDetails?: {
+    relatedPlaylists?: {
+      uploads?: string;
+    };
+  };
+  statistics?: {
+    viewCount?: string;
+    subscriberCount?: string;
+    hiddenSubscriberCount?: boolean;
+    videoCount?: string;
+  };
+  brandingSettings?: {
+    image?: {
+      bannerExternalUrl?: string;
+    };
+  };
+}
+
+export interface YouTubeChannelsResponse {
+  items?: YouTubeChannelItem[];
+  error?: {
+    code?: number;
+    message?: string;
+    errors?: Array<{
+      domain?: string;
+      reason?: string;
+      message?: string;
+    }>;
+  };
+}
+
+export interface YouTubePlaylistsResponse {
+  items?: Array<{
+    id?: string;
+    snippet?: {
+      title?: string;
+      description?: string;
+      publishedAt?: string;
+      thumbnails?: {
+        maxres?: { url?: string };
+        standard?: { url?: string };
+        high?: { url?: string };
+        medium?: { url?: string };
+        default?: { url?: string };
+      };
+    };
+    contentDetails?: {
+      itemCount?: number;
+    };
+  }>;
+  error?: {
+    code?: number;
+    message?: string;
+    errors?: Array<{
       reason?: string;
       message?: string;
     }>;

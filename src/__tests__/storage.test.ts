@@ -188,25 +188,35 @@ describe('Storage Service', () => {
 
   describe('Historial de reproducción (Watch History)', () => {
     it('registra los vídeos vistos, actualiza su minutaje y los ordena del más reciente al más antiguo', async () => {
-      await storage.recordVideoWatch({
-        id: 'vid_1',
-        title: 'Primer Vídeo Visto',
-        thumbnail: 'https://example.com/v1.jpg',
-        channelId: 'UC_1',
-        channelTitle: 'Canal 1',
-        publishedAt: '2026-10-01T10:00:00Z',
-        viewCount: 15400,
-      });
+      await storage.recordVideoWatch(
+        {
+          id: 'vid_1',
+          title: 'Primer Vídeo Visto',
+          thumbnail: 'https://example.com/v1.jpg',
+          channelId: 'UC_1',
+          channelTitle: 'Canal 1',
+          publishedAt: '2026-10-01T10:00:00Z',
+          viewCount: 15400,
+        },
+        undefined,
+        undefined,
+        1000
+      );
 
-      await storage.recordVideoWatch({
-        id: 'vid_2',
-        title: 'Segundo Vídeo Visto',
-        thumbnail: 'https://example.com/v2.jpg',
-        channelId: 'UC_2',
-        channelTitle: 'Canal 2',
-        publishedAt: '2026-10-02T10:00:00Z',
-        viewCount: 93900,
-      });
+      await storage.recordVideoWatch(
+        {
+          id: 'vid_2',
+          title: 'Segundo Vídeo Visto',
+          thumbnail: 'https://example.com/v2.jpg',
+          channelId: 'UC_2',
+          channelTitle: 'Canal 2',
+          publishedAt: '2026-10-02T10:00:00Z',
+          viewCount: 93900,
+        },
+        undefined,
+        undefined,
+        2000
+      );
 
       // Actualiza el minutaje del primer vídeo y lo sincroniza con el historial
       await storage.updateVideoProgress('vid_1', 125, 600);

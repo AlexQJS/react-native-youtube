@@ -178,6 +178,7 @@ describe('Feed Service & Hook', () => {
       thumbnail: 'https://i1.ytimg.com/vi/rss_vid_1/hqdefault.jpg',
       channelId: 'UC_channel_A',
       channelTitle: 'Canal A',
+      channelThumbnail: 'https://example.com/a.jpg',
       publishedAt: '2026-10-08T10:00:00+00:00',
       viewCount: 93966,
     });

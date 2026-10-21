@@ -47,8 +47,9 @@ function BottomNavigationBar() {
   const isSearchActive = pathname.startsWith('/search');
   const isHistoryActive = pathname.startsWith('/history');
   const isConfigActive = pathname.startsWith('/config');
+  const isChannelActive = pathname.startsWith('/channel');
   const isFeedActive =
-    !isSearchActive && !isHistoryActive && !isConfigActive;
+    !isSearchActive && !isHistoryActive && !isConfigActive && !isChannelActive;
 
   return (
     <View
@@ -260,6 +261,13 @@ function AppShell() {
             />
             <Tabs.Screen
               name="player/[id]"
+              options={{
+                href: null,
+                headerShown: false,
+              }}
+            />
+            <Tabs.Screen
+              name="channel/[id]"
               options={{
                 href: null,
                 headerShown: false,

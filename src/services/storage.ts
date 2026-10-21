@@ -720,7 +720,6 @@ export const storage = {
           position: entry.position,
           duration: entry.duration > 0 ? entry.duration : updatedHistory[idx].duration,
           completed: entry.completed,
-          watchedAt: timestamp,
         };
         await this.saveWatchHistory(updatedHistory);
       }
