@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { config } from '../config/config';
-import { youtubeService } from '../services/youtube';
+import { extractYouTubeVideoId, youtubeService } from '../services/youtube';
 import { FavoriteChannel, VideoItem, YouTubeAppError } from '../types/youtube';
 import { createDebounce } from '../utils/debounce';
 
@@ -46,6 +46,19 @@ export function useChannelSearch(): UseChannelSearchReturn {
     setError(null);
 
     try {
+      const extracted = extractYouTubeVideoId(trimmed);
+
+      if (extracted?.isExplicitUrl) {
+        const videos = await youtubeService.searchVideos(trimmed);
+        if (currentRequestId !== requestIdRef.current) {
+          return;
+        }
+        setResults([]);
+        setVideoResults(videos);
+        setHasSearched(true);
+        return;
+      }
+
       const [channelsRes, videosRes] = await Promise.allSettled([
         youtubeService.searchChannels(trimmed),
         youtubeService.searchVideos(trimmed),
@@ -67,7 +80,13 @@ export function useChannelSearch(): UseChannelSearchReturn {
         throw channelsRes.reason;
       }
 
-      setResults(channels);
+      const matchedUnlistedVideo =
+        extracted &&
+        videos.length === 1 &&
+        videos[0].id === extracted.videoId &&
+        Boolean(videos[0].isUnlisted);
+
+      setResults(matchedUnlistedVideo ? [] : channels);
       setVideoResults(videos);
       setHasSearched(true);
     } catch (err) {

@@ -122,6 +122,26 @@ function VideoCardComponent({
           </View>
         )}
 
+        {/* Unlisted video indicator badge in the top-right corner */}
+        {video.isUnlisted && (
+          <View
+            testID={`video-unlisted-badge-${video.id}`}
+            style={[
+              styles.unlistedBadge,
+              { backgroundColor: colors.badgeBackground },
+            ]}
+          >
+            <Ionicons
+              name="link-outline"
+              size={config.theme.sizes.iconSm - 2}
+              color={colors.badgeText}
+            />
+            <Text style={[styles.badgeText, { color: colors.badgeText }]}>
+              Unlisted
+            </Text>
+          </View>
+        )}
+
         {/* Etiqueta de duración en la esquina inferior derecha */}
         {durationText ? (
           <View
@@ -271,6 +291,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: config.theme.spacing.sm,
     left: config.theme.spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: config.theme.spacing.xs,
+    paddingHorizontal: config.theme.spacing.sm,
+    paddingVertical: config.theme.spacing.xs,
+    borderRadius: config.theme.radii.xs,
+  },
+  unlistedBadge: {
+    position: 'absolute',
+    top: config.theme.spacing.sm,
+    right: config.theme.spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
     gap: config.theme.spacing.xs,

@@ -57,6 +57,8 @@ export interface VideoItem {
   isShort?: boolean;
   /** Número de visitas / visualizaciones del vídeo */
   viewCount?: number;
+  /** Indicates whether the video is unlisted on YouTube */
+  isUnlisted?: boolean;
 }
 
 export interface PlaybackProgressEntry {

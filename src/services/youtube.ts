@@ -60,6 +60,44 @@ export function getSpecializedPlaylistIds(channelId: string): {
   return null;
 }
 
+const YOUTUBE_VIDEO_ID_REGEX = /^[A-Za-z0-9_-]{11}$/;
+
+export interface ExtractedVideoId {
+  videoId: string;
+  /** True when the input is an explicit YouTube URL or ID prefix rather than a bare 11-character token */
+  isExplicitUrl: boolean;
+}
+
+/**
+ * Extracts a YouTube 11-character video ID from a raw ID, an explicit prefix
+ * (`id:<id>` or `v=<id>`), or any standard YouTube video URL
+ * (`watch`, `youtu.be`, `shorts`, `embed`, `live`, `v`).
+ */
+export function extractYouTubeVideoId(input: string): ExtractedVideoId | null {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (YOUTUBE_VIDEO_ID_REGEX.test(trimmed)) {
+    return { videoId: trimmed, isExplicitUrl: false };
+  }
+
+  const prefixMatch = trimmed.match(/^(?:id:|v=)([A-Za-z0-9_-]{11})$/i);
+  if (prefixMatch) {
+    return { videoId: prefixMatch[1], isExplicitUrl: true };
+  }
+
+  const urlMatch = trimmed.match(
+    /^(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube\.com\/(?:watch\?(?:[^#\s]*&)?v=|shorts\/|embed\/|live\/|v\/)|youtube-nocookie\.com\/embed\/|youtu\.be\/)([A-Za-z0-9_-]{11})(?:[?&#/\s]|$)/i
+  );
+  if (urlMatch) {
+    return { videoId: urlMatch[1], isExplicitUrl: true };
+  }
+
+  return null;
+}
+
 /**
  * Normaliza URLs de miniaturas que puedan empezar por "//"
  */
@@ -850,6 +888,279 @@ const INNER_TUBE_CLIENT_CONTEXT = {
 };
 
 /**
+ * Fetches a single video (public or unlisted) by its exact ID using YouTube Data API v3.
+ */
+async function fetchVideoByIdWithKey(
+  videoId: string,
+  apiKey: string
+): Promise<VideoItem | null> {
+  const params = new URLSearchParams({
+    part: 'snippet,contentDetails,statistics,status',
+    id: videoId,
+    key: apiKey,
+  });
+
+  const url = `${config.api.baseUrl}/videos?${params.toString()}`;
+  const data = await fetchYouTubeJson<YouTubeVideosResponse>(url);
+  const item = data.items?.[0];
+  if (!item) {
+    return null;
+  }
+
+  const privacyStatus = item.status?.privacyStatus;
+  if (privacyStatus === 'private') {
+    return null;
+  }
+
+  const id = item.id ?? videoId;
+  const rawTitle = item.snippet?.title ?? '';
+  const title = decodeHtmlEntities(rawTitle).trim();
+  if (!id || !title || title === 'Private video' || title === 'Deleted video') {
+    return null;
+  }
+
+  const thumbnail = normalizeThumbnailUrl(
+    item.snippet?.thumbnails?.maxres?.url ??
+      item.snippet?.thumbnails?.standard?.url ??
+      item.snippet?.thumbnails?.high?.url ??
+      item.snippet?.thumbnails?.medium?.url ??
+      item.snippet?.thumbnails?.default?.url ??
+      `https://i.ytimg.com/vi/${id}/hqdefault.jpg`
+  );
+
+  const channelId = item.snippet?.channelId ?? '';
+  const channelTitle = decodeHtmlEntities(item.snippet?.channelTitle ?? '').trim();
+  const publishedAt = item.snippet?.publishedAt ?? '';
+  const rawDesc = item.snippet?.description;
+  const description = rawDesc ? decodeHtmlEntities(rawDesc).trim() : undefined;
+
+  const durationSeconds = parseIsoDuration(item.contentDetails?.duration);
+  const durationFormatted =
+    durationSeconds !== undefined ? formatDuration(durationSeconds) : undefined;
+  const rawViews = item.statistics?.viewCount
+    ? Number(item.statistics.viewCount)
+    : undefined;
+  const viewCount =
+    rawViews !== undefined && Number.isFinite(rawViews) ? rawViews : undefined;
+
+  const isShort = detectIsShort({
+    title,
+    description,
+    durationSeconds,
+  });
+  const isUnlisted = privacyStatus === 'unlisted';
+
+  return {
+    id,
+    title,
+    thumbnail,
+    channelId,
+    channelTitle,
+    publishedAt,
+    ...(description ? { description } : {}),
+    ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+    ...(durationFormatted ? { durationFormatted } : {}),
+    ...(viewCount !== undefined ? { viewCount } : {}),
+    ...(isShort ? { isShort: true } : {}),
+    ...(isUnlisted ? { isUnlisted: true } : {}),
+  };
+}
+
+/**
+ * Fallback lookup using YouTube's public oEmbed endpoint, which works for public and unlisted videos.
+ */
+async function fetchVideoByIdFromOEmbed(
+  videoId: string,
+  rethrowNetworkError = false
+): Promise<VideoItem | null> {
+  let response: Response;
+  try {
+    const watchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    response = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(watchUrl)}&format=json`,
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      }
+    );
+  } catch {
+    if (rethrowNetworkError) {
+      throw new YouTubeAppError(
+        'Could not connect to YouTube. Check your internet connection.',
+        'NETWORK_ERROR',
+        true
+      );
+    }
+    return null;
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    return null;
+  }
+
+  const title = decodeHtmlEntities(data?.title ?? '').trim();
+  if (!title) {
+    return null;
+  }
+
+  const thumbnail = normalizeThumbnailUrl(
+    data?.thumbnail_url ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+  );
+  const channelTitle = decodeHtmlEntities(data?.author_name ?? '').trim();
+  const isShort = detectIsShort({ title });
+
+  return {
+    id: videoId,
+    title,
+    thumbnail,
+    channelId: '',
+    channelTitle,
+    publishedAt: '',
+    ...(isShort ? { isShort: true } : {}),
+  };
+}
+
+/**
+ * Fetches a single video (public or unlisted) by its exact ID without an API key
+ * via YouTube InnerTube (/youtubei/v1/player), falling back to oEmbed if needed.
+ */
+async function fetchVideoByIdWithoutKey(videoId: string): Promise<VideoItem | null> {
+  let response: Response;
+  try {
+    response = await fetch(
+      'https://www.youtube.com/youtubei/v1/player?prettyPrint=false',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          context: INNER_TUBE_CLIENT_CONTEXT,
+          videoId,
+        }),
+      }
+    );
+  } catch {
+    return await fetchVideoByIdFromOEmbed(videoId, true);
+  }
+
+  if (response.status === 429) {
+    throw new YouTubeAppError(
+      'Too many requests to YouTube. Please wait a moment and try again.',
+      'RATE_LIMIT',
+      true,
+      429
+    );
+  }
+
+  if (!response.ok) {
+    return await fetchVideoByIdFromOEmbed(videoId);
+  }
+
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    return await fetchVideoByIdFromOEmbed(videoId);
+  }
+
+  const playabilityStatus: string = data?.playabilityStatus?.status ?? '';
+  const details = data?.videoDetails;
+  const microformat = data?.microformat?.playerMicroformatRenderer;
+
+  if (details?.isPrivate === true) {
+    return null;
+  }
+
+  if (playabilityStatus === 'ERROR' || playabilityStatus === 'UNPLAYABLE') {
+    return null;
+  }
+
+  const returnedId: string = details?.videoId ?? '';
+  if (returnedId && returnedId !== videoId) {
+    return null;
+  }
+
+  const rawTitle: string =
+    details?.title ?? microformat?.title?.simpleText ?? '';
+  const title = decodeHtmlEntities(rawTitle).trim();
+
+  if (!title) {
+    return await fetchVideoByIdFromOEmbed(videoId);
+  }
+
+  const thumbs: Array<{ url?: string }> =
+    details?.thumbnail?.thumbnails ??
+    microformat?.thumbnail?.thumbnails ??
+    [];
+  const bestThumb =
+    thumbs[thumbs.length - 1]?.url ??
+    thumbs[0]?.url ??
+    `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  const thumbnail = normalizeThumbnailUrl(bestThumb);
+
+  const channelId: string =
+    details?.channelId ?? microformat?.externalChannelId ?? '';
+  const channelTitle = decodeHtmlEntities(
+    details?.author ?? microformat?.ownerChannelName ?? ''
+  ).trim();
+  const publishedAt: string =
+    microformat?.publishDate ?? microformat?.uploadDate ?? '';
+
+  const rawDesc: string =
+    details?.shortDescription ?? microformat?.description?.simpleText ?? '';
+  const description = decodeHtmlEntities(rawDesc).trim() || undefined;
+
+  const rawLength = details?.lengthSeconds ?? microformat?.lengthSeconds;
+  const parsedLength =
+    rawLength !== undefined && rawLength !== '' ? Number(rawLength) : NaN;
+  const durationSeconds =
+    Number.isFinite(parsedLength) && parsedLength > 0
+      ? Math.floor(parsedLength)
+      : undefined;
+  const durationFormatted =
+    durationSeconds !== undefined ? formatDuration(durationSeconds) : undefined;
+
+  const rawViews = details?.viewCount ?? microformat?.viewCount;
+  const parsedViews =
+    rawViews !== undefined && rawViews !== '' ? Number(rawViews) : NaN;
+  const viewCount =
+    Number.isFinite(parsedViews) && parsedViews >= 0 ? parsedViews : undefined;
+
+  const isShort = detectIsShort({
+    title,
+    description,
+    durationSeconds,
+  });
+  const isUnlisted = Boolean(microformat?.isUnlisted);
+
+  return {
+    id: videoId,
+    title,
+    thumbnail,
+    channelId,
+    channelTitle,
+    publishedAt,
+    ...(description ? { description } : {}),
+    ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+    ...(durationFormatted ? { durationFormatted } : {}),
+    ...(viewCount !== undefined ? { viewCount } : {}),
+    ...(isShort ? { isShort: true } : {}),
+    ...(isUnlisted ? { isUnlisted: true } : {}),
+  };
+}
+
+/**
  * Consulta la información y perfil de un canal mediante YouTube Data API v3.
  */
 async function fetchChannelDetailsFromApi(
@@ -1368,16 +1679,19 @@ export const youtubeService = {
   },
 
   /**
-   * Busca vídeos de YouTube por texto.
+   * Fetches a single YouTube video (public or unlisted) by its exact 11-character video ID.
    */
-  async searchVideos(query: string, apiKeyOverride?: string): Promise<VideoItem[]> {
-    const trimmed = query.trim();
-    if (!trimmed || trimmed.length < config.search.minQueryLength) {
-      return [];
+  async getVideoById(
+    videoId: string,
+    apiKeyOverride?: string
+  ): Promise<VideoItem | null> {
+    const trimmed = videoId.trim();
+    if (!YOUTUBE_VIDEO_ID_REGEX.test(trimmed)) {
+      return null;
     }
 
     const apiKey = getActiveApiKey(apiKeyOverride);
-    const requestKey = `searchVideos:${apiKey ? 'api' : 'nokey'}:${trimmed.toLowerCase()}`;
+    const requestKey = `videoById:${apiKey ? 'api' : 'nokey'}:${trimmed}`;
     const existing = inFlightRequests.get(requestKey);
     if (existing) {
       return existing;
@@ -1385,59 +1699,128 @@ export const youtubeService = {
 
     const requestPromise = (async () => {
       try {
-        if (!apiKey) {
-          return await searchVideosWithoutKey(trimmed);
+        if (apiKey) {
+          return await fetchVideoByIdWithKey(trimmed, apiKey);
+        }
+        return await fetchVideoByIdWithoutKey(trimmed);
+      } finally {
+        inFlightRequests.delete(requestKey);
+      }
+    })();
+
+    inFlightRequests.set(requestKey, requestPromise);
+    return requestPromise;
+  },
+
+  /**
+   * Searches YouTube videos by text, video ID, or video URL (including unlisted videos).
+   */
+  async searchVideos(query: string, apiKeyOverride?: string): Promise<VideoItem[]> {
+    const trimmed = query.trim();
+    if (!trimmed || trimmed.length < config.search.minQueryLength) {
+      return [];
+    }
+
+    const extracted = extractYouTubeVideoId(trimmed);
+    const apiKey = getActiveApiKey(apiKeyOverride);
+    // Preserve exact case in request key when query may be a case-sensitive video ID
+    const normalizedKeyPart = extracted ? trimmed : trimmed.toLowerCase();
+    const requestKey = `searchVideos:${apiKey ? 'api' : 'nokey'}:${normalizedKeyPart}`;
+    const existing = inFlightRequests.get(requestKey);
+    if (existing) {
+      return existing;
+    }
+
+    const runTextVideoSearch = async (): Promise<VideoItem[]> => {
+      if (!apiKey) {
+        return await searchVideosWithoutKey(trimmed);
+      }
+
+      const params = new URLSearchParams({
+        part: 'snippet',
+        type: 'video',
+        maxResults: String(config.search.maxVideoResults),
+        q: trimmed,
+        key: apiKey,
+      });
+
+      const url = `${config.api.baseUrl}/search?${params.toString()}`;
+      const data = await fetchYouTubeJson<YouTubeSearchResponse>(url);
+      const items = data.items ?? [];
+      const videos: VideoItem[] = [];
+      const seen = new Set<string>();
+
+      for (const item of items) {
+        const id = item.id?.videoId ?? '';
+        const rawTitle = item.snippet?.title ?? '';
+        const title = decodeHtmlEntities(rawTitle).trim();
+
+        if (!id || !title || seen.has(id)) {
+          continue;
         }
 
-        const params = new URLSearchParams({
-          part: 'snippet',
-          type: 'video',
-          maxResults: String(config.search.maxVideoResults),
-          q: trimmed,
-          key: apiKey,
+        seen.add(id);
+        const thumbnail = normalizeThumbnailUrl(
+          item.snippet?.thumbnails?.high?.url ??
+            item.snippet?.thumbnails?.medium?.url ??
+            item.snippet?.thumbnails?.default?.url ??
+            `https://i.ytimg.com/vi/${id}/hqdefault.jpg`
+        );
+
+        const channelId = item.snippet?.channelId ?? '';
+        const channelTitle = decodeHtmlEntities(item.snippet?.channelTitle ?? '').trim();
+        const publishedAt = item.snippet?.publishedAt ?? '';
+        const rawDesc = item.snippet?.description;
+        const description = rawDesc ? decodeHtmlEntities(rawDesc).trim() : undefined;
+
+        videos.push({
+          id,
+          title,
+          thumbnail,
+          channelId,
+          channelTitle,
+          publishedAt,
+          ...(description ? { description } : {}),
         });
+      }
 
-        const url = `${config.api.baseUrl}/search?${params.toString()}`;
-        const data = await fetchYouTubeJson<YouTubeSearchResponse>(url);
-        const items = data.items ?? [];
-        const videos: VideoItem[] = [];
-        const seen = new Set<string>();
+      return await this.enrichVideosWithDetails(videos, apiKey);
+    };
 
-        for (const item of items) {
-          const id = item.id?.videoId ?? '';
-          const rawTitle = item.snippet?.title ?? '';
-          const title = decodeHtmlEntities(rawTitle).trim();
+    const requestPromise = (async () => {
+      try {
+        if (extracted?.isExplicitUrl) {
+          const directVideo = await this.getVideoById(extracted.videoId, apiKeyOverride);
+          return directVideo ? [directVideo] : [];
+        }
 
-          if (!id || !title || seen.has(id)) {
-            continue;
+        if (extracted) {
+          const [directRes, textRes] = await Promise.allSettled([
+            this.getVideoById(extracted.videoId, apiKeyOverride),
+            runTextVideoSearch(),
+          ]);
+
+          const directVideo =
+            directRes.status === 'fulfilled' ? directRes.value : null;
+          const textVideos =
+            textRes.status === 'fulfilled' ? textRes.value : [];
+
+          if (directVideo) {
+            if (directVideo.isUnlisted) {
+              return [directVideo];
+            }
+            const deduped = textVideos.filter((v) => v.id !== directVideo.id);
+            return [directVideo, ...deduped];
           }
 
-          seen.add(id);
-          const thumbnail = normalizeThumbnailUrl(
-            item.snippet?.thumbnails?.high?.url ??
-              item.snippet?.thumbnails?.medium?.url ??
-              item.snippet?.thumbnails?.default?.url ??
-              `https://i.ytimg.com/vi/${id}/hqdefault.jpg`
-          );
+          if (textRes.status === 'rejected') {
+            throw textRes.reason;
+          }
 
-          const channelId = item.snippet?.channelId ?? '';
-          const channelTitle = decodeHtmlEntities(item.snippet?.channelTitle ?? '').trim();
-          const publishedAt = item.snippet?.publishedAt ?? '';
-          const rawDesc = item.snippet?.description;
-          const description = rawDesc ? decodeHtmlEntities(rawDesc).trim() : undefined;
-
-          videos.push({
-            id,
-            title,
-            thumbnail,
-            channelId,
-            channelTitle,
-            publishedAt,
-            ...(description ? { description } : {}),
-          });
+          return textVideos;
         }
 
-        return await this.enrichVideosWithDetails(videos, apiKey);
+        return await runTextVideoSearch();
       } finally {
         inFlightRequests.delete(requestKey);
       }
@@ -1459,6 +1842,12 @@ export const youtubeService = {
       return { channels: [], videos: [] };
     }
 
+    const extracted = extractYouTubeVideoId(trimmed);
+    if (extracted?.isExplicitUrl) {
+      const videos = await this.searchVideos(trimmed, apiKeyOverride);
+      return { channels: [], videos };
+    }
+
     const [channelsResult, videosResult] = await Promise.allSettled([
       this.searchChannels(trimmed, apiKeyOverride),
       this.searchVideos(trimmed, apiKeyOverride),
@@ -1468,9 +1857,17 @@ export const youtubeService = {
       throw channelsResult.reason;
     }
 
+    const channels = channelsResult.status === 'fulfilled' ? channelsResult.value : [];
+    const videos = videosResult.status === 'fulfilled' ? videosResult.value : [];
+    const matchedUnlistedVideo =
+      extracted &&
+      videos.length === 1 &&
+      videos[0].id === extracted.videoId &&
+      Boolean(videos[0].isUnlisted);
+
     return {
-      channels: channelsResult.status === 'fulfilled' ? channelsResult.value : [],
-      videos: videosResult.status === 'fulfilled' ? videosResult.value : [],
+      channels: matchedUnlistedVideo ? [] : channels,
+      videos,
     };
   },
 

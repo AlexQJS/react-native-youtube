@@ -25,6 +25,7 @@ import { useChannelSearch } from '../hooks/useChannelSearch';
 import { useFavorites } from '../hooks/useFavorites';
 import { usePlaybackProgress } from '../hooks/usePlaybackProgress';
 import { useThemeColors } from '../hooks/useThemeColors';
+import { extractYouTubeVideoId } from '../services/youtube';
 import { FavoriteChannel, VideoItem } from '../types/youtube';
 
 type SearchTabFilter = 'all' | 'videos' | 'channels';
@@ -48,6 +49,25 @@ export default function SearchScreen() {
   } = useChannelSearch();
 
   const [activeFilter, setActiveFilter] = useState<SearchTabFilter>('all');
+
+  const handleChangeQuery = useCallback(
+    (text: string) => {
+      if (activeFilter === 'channels' && extractYouTubeVideoId(text)) {
+        setActiveFilter('all');
+      }
+      setQuery(text);
+    },
+    [activeFilter, setQuery]
+  );
+
+  const handleClearSearch = useCallback(() => {
+    setActiveFilter('all');
+    clearSearch();
+  }, [clearSearch]);
+
+  const handleSubmitSearch = useCallback(() => {
+    retry();
+  }, [retry]);
 
   const isShowingFavorites = query.trim().length < config.search.minQueryLength;
   const hasMiniPlayer = Boolean(activeVideo && isMinimized);
@@ -143,8 +163,9 @@ export default function SearchScreen() {
           <TextInput
             testID="channel-search-input"
             value={query}
-            onChangeText={setQuery}
-            placeholder="Buscar vídeos o canales de YouTube..."
+            onChangeText={handleChangeQuery}
+            onSubmitEditing={handleSubmitSearch}
+            placeholder="Search videos, channels, or video ID..."
             placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
@@ -156,7 +177,7 @@ export default function SearchScreen() {
               testID="clear-search-button"
               accessibilityRole="button"
               accessibilityLabel="Limpiar búsqueda"
-              onPress={clearSearch}
+              onPress={handleClearSearch}
               hitSlop={8}
             >
               <Ionicons
