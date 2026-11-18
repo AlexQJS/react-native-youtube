@@ -89,7 +89,7 @@ export function extractYouTubeVideoId(input: string): ExtractedVideoId | null {
   }
 
   const urlMatch = trimmed.match(
-    /^(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube\.com\/(?:watch\?(?:[^#\s]*&)?v=|shorts\/|embed\/|live\/|v\/)|youtube-nocookie\.com\/embed\/|youtu\.be\/)([A-Za-z0-9_-]{11})(?:[?&#/\s]|$)/i
+    /^(?:https?:\/\/)?(?:(?:www|m|music|studio)\.)?(?:youtube\.com\/(?:watch\?(?:[^#\s]*&)?v=|shorts\/|embed\/|live\/|v\/|video\/)|youtube-nocookie\.com\/embed\/|youtu\.be\/)([A-Za-z0-9_-]{11})(?:[?&#/\s]|$)/i
   );
   if (urlMatch) {
     return { videoId: urlMatch[1], isExplicitUrl: true };
@@ -1082,10 +1082,6 @@ async function fetchVideoByIdWithoutKey(videoId: string): Promise<VideoItem | nu
     return null;
   }
 
-  if (playabilityStatus === 'ERROR' || playabilityStatus === 'UNPLAYABLE') {
-    return null;
-  }
-
   const returnedId: string = details?.videoId ?? '';
   if (returnedId && returnedId !== videoId) {
     return null;
@@ -1096,6 +1092,10 @@ async function fetchVideoByIdWithoutKey(videoId: string): Promise<VideoItem | nu
   const title = decodeHtmlEntities(rawTitle).trim();
 
   if (!title) {
+    // When InnerTube explicitly reports ERROR with no metadata, the video does not exist
+    if (playabilityStatus === 'ERROR') {
+      return null;
+    }
     return await fetchVideoByIdFromOEmbed(videoId);
   }
 
@@ -1142,7 +1142,10 @@ async function fetchVideoByIdWithoutKey(videoId: string): Promise<VideoItem | nu
     description,
     durationSeconds,
   });
-  const isUnlisted = Boolean(microformat?.isUnlisted);
+  const isUnlisted =
+    typeof microformat?.isUnlisted === 'boolean'
+      ? microformat.isUnlisted
+      : details?.isCrawlable === false;
 
   return {
     id: videoId,

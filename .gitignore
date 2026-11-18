@@ -35,3 +35,5 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+install_err.txt
+install_out.txt

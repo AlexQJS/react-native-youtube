@@ -49,6 +49,7 @@ describe('Video ID & Unlisted Video Search', () => {
         'https://www.youtube.com/shorts/dQw4w9WgXcQ?feature=share',
         'https://www.youtube.com/live/dQw4w9WgXcQ',
         'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+        'https://studio.youtube.com/video/dQw4w9WgXcQ/edit',
       ];
 
       for (const url of urls) {
@@ -117,6 +118,57 @@ describe('Video ID & Unlisted Video Search', () => {
         durationSeconds: 245,
         durationFormatted: '4:05',
         viewCount: 42,
+        isUnlisted: true,
+      });
+    });
+
+    it('still extracts unlisted video metadata when InnerTube /player returns UNPLAYABLE with videoDetails', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          playabilityStatus: {
+            status: 'UNPLAYABLE',
+            reason: 'Es necesario volver a cargar la página.',
+          },
+          videoDetails: {
+            videoId: 'uNpLaY_1234',
+            title: 'Unlisted Video With Reload Prompt',
+            lengthSeconds: '125',
+            channelId: 'UC_unlisted_ch',
+            shortDescription: 'Unlisted description',
+            thumbnail: {
+              thumbnails: [
+                { url: 'https://i.ytimg.com/vi/uNpLaY_1234/hqdefault.jpg' },
+              ],
+            },
+            viewCount: '7',
+            author: 'Hidden Creator',
+            isPrivate: false,
+            isCrawlable: false,
+          },
+          microformat: {
+            playerMicroformatRenderer: {
+              publishDate: '2026-11-10',
+              isUnlisted: true,
+            },
+          },
+        }),
+      }) as unknown as typeof fetch;
+
+      const video = await youtubeService.getVideoById('uNpLaY_1234', '');
+
+      expect(video).toEqual({
+        id: 'uNpLaY_1234',
+        title: 'Unlisted Video With Reload Prompt',
+        thumbnail: 'https://i.ytimg.com/vi/uNpLaY_1234/hqdefault.jpg',
+        channelId: 'UC_unlisted_ch',
+        channelTitle: 'Hidden Creator',
+        publishedAt: '2026-11-10',
+        description: 'Unlisted description',
+        durationSeconds: 125,
+        durationFormatted: '2:05',
+        viewCount: 7,
         isUnlisted: true,
       });
     });
