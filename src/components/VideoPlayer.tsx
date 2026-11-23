@@ -27,6 +27,8 @@ import { calculateProgressRatio, formatDuration } from '../utils/format';
 
 export { VIDEO_PLAYER_KEEP_AWAKE_TAG };
 
+const WebViewComponent = WebView as any;
+
 export interface VideoPlayerProps {
   videoId: string;
   title?: string;
@@ -820,7 +822,7 @@ export function VideoPlayer({
           </View>
         ) : (
           <>
-            <WebView
+            <WebViewComponent
               key={`yt-webview-${videoId}-${reloadKey}`}
               ref={webViewRef}
               originWhitelist={['*']}

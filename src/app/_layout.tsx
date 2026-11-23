@@ -206,7 +206,6 @@ function AppShell() {
       >
         <View style={styles.mainStage}>
           <Tabs
-            initialRouteName="feed"
             backBehavior="history"
             tabBar={() => null}
             screenOptions={{
@@ -226,16 +225,16 @@ function AppShell() {
             }}
           >
             <Tabs.Screen
-              name="index"
-              options={{
-                href: null,
-              }}
-            />
-            <Tabs.Screen
               name="feed"
               options={{
                 title: 'Feed',
                 headerTitle: config.app.name,
+              }}
+            />
+            <Tabs.Screen
+              name="index"
+              options={{
+                href: null,
               }}
             />
             <Tabs.Screen
@@ -267,7 +266,7 @@ function AppShell() {
               }}
             />
             <Tabs.Screen
-              name="channel/[id]"
+              name="channel"
               options={{
                 href: null,
                 headerShown: false,

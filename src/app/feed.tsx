@@ -110,8 +110,9 @@ export default function FeedScreen() {
   const handleOpenChannel = useCallback(
     (channelId: string, channelTitle?: string) => {
       router.push({
-        pathname: `/channel/${channelId}`,
+        pathname: '/channel/[id]',
         params: {
+          id: channelId,
           name: channelTitle || '',
         },
       });

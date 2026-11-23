@@ -20,7 +20,7 @@ describe('Feed Service & Hook', () => {
 
   it('devuelve un feed vacío sin llamar a la API cuando no hay canales favoritos', async () => {
     const spy = jest.spyOn(youtubeService, 'getFeedForChannels');
-    const { result } = renderHook(() => useFeed([], false));
+    const { result } = await renderHook(() => useFeed([], false));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -69,14 +69,14 @@ describe('Feed Service & Hook', () => {
       .spyOn(youtubeService, 'enrichVideosWithDetails')
       .mockImplementation(async (videos) => videos);
 
-    const { result } = renderHook(() => useFeed(sampleChannels, false));
+    const { result } = await renderHook(() => useFeed(sampleChannels, false));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
 
     expect(result.current.error).toBeNull();
-    expect(result.current.videos.map((v) => v.id)).toEqual([
+    expect(result.current.videos.map((v: any) => v.id)).toEqual([
       'vid_newest',
       'vid_middle',
       'vid_older',
@@ -106,7 +106,7 @@ describe('Feed Service & Hook', () => {
     );
 
     const spy = jest.spyOn(youtubeService, 'getFeedForChannels');
-    const { result } = renderHook(() => useFeed(sampleChannels, false));
+    const { result } = await renderHook(() => useFeed(sampleChannels, false));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -124,7 +124,7 @@ describe('Feed Service & Hook', () => {
         new YouTubeAppError('Cuota de API excedida', 'RATE_LIMIT', true, 429)
       );
 
-    const { result } = renderHook(() => useFeed(sampleChannels, false));
+    const { result } = await renderHook(() => useFeed(sampleChannels, false));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);

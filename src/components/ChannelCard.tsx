@@ -20,6 +20,20 @@ function ChannelCardComponent({
 }: ChannelCardProps) {
   const { colors } = useThemeColors();
   const [imageError, setImageError] = useState(false);
+  const isFavoritePressedRef = React.useRef(false);
+
+  const handleCardPress = React.useCallback(() => {
+    if (isFavoritePressedRef.current) {
+      isFavoritePressedRef.current = false;
+      return;
+    }
+    onPress?.(channel);
+  }, [channel, onPress]);
+
+  const handleToggleFavorite = React.useCallback(() => {
+    isFavoritePressedRef.current = true;
+    onToggleFavorite(channel);
+  }, [channel, onToggleFavorite]);
 
   const initial = channel.name ? channel.name.charAt(0).toUpperCase() : '?';
   const showImage = Boolean(channel.thumbnail && !imageError);
@@ -29,7 +43,7 @@ function ChannelCardComponent({
       testID={`channel-card-${channel.id}`}
       accessibilityRole="button"
       accessibilityLabel={`Ver canal ${channel.name}`}
-      onPress={() => onPress?.(channel)}
+      onPress={handleCardPress}
       style={({ pressed }) => [
         styles.container,
         {
@@ -110,7 +124,7 @@ function ChannelCardComponent({
       <FavoriteButton
         testID={`fav-btn-${channel.id}`}
         isFavorite={isFavorite}
-        onPress={() => onToggleFavorite(channel)}
+        onPress={handleToggleFavorite}
       />
     </Pressable>
   );

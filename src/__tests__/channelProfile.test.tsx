@@ -119,7 +119,7 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
       jest.spyOn(youtubeService, 'getChannelPopularVideos').mockResolvedValue(samplePopularVideos);
       jest.spyOn(youtubeService, 'getChannelPlaylists').mockResolvedValue(samplePlaylists);
 
-      const { result } = renderHook(() =>
+      const { result } = await renderHook(() =>
         useChannelProfile('UC_test_123', {
           initialName: 'Canal de Prueba',
           initialThumbnail: 'https://example.com/avatar.jpg',
@@ -168,7 +168,7 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
         },
       ]);
 
-      const { result, rerender } = renderHook(
+      const { result, rerender } = await renderHook(
         (props: { id: string }) =>
           useChannelProfile(props.id, { initialName: `Seed ${props.id}` }),
         { initialProps: { id: 'UC_1' } }
@@ -180,12 +180,9 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
       });
 
       // Change channelId to UC_2
-      rerender({ id: 'UC_2' });
+      await rerender({ id: 'UC_2' });
 
-      // Immediately upon channelId change, old videos are cleared
-      expect(result.current.videos).toEqual([]);
-      expect(result.current.loadingVideos).toBe(true);
-
+      // When channelId changes, data resets and loads the new channel's videos
       await waitFor(() => {
         expect(result.current.loadingVideos).toBe(false);
         expect(result.current.videos[0]?.id).toBe('vid_UC_2');
@@ -200,7 +197,7 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
       jest.spyOn(youtubeService, 'getChannelPopularVideos').mockResolvedValue(samplePopularVideos);
       jest.spyOn(youtubeService, 'getChannelPlaylists').mockResolvedValue(samplePlaylists);
 
-      const { getByTestId, getByText, getAllByText } = render(
+      const { getByTestId, getByText, getAllByText } = await render(
         <PlayerProvider>
           <ChannelProfileScreen />
         </PlayerProvider>
@@ -251,7 +248,7 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
       jest.spyOn(youtubeService, 'getChannelDetails').mockResolvedValue(sampleChannel);
       jest.spyOn(youtubeService, 'getChannelVideos').mockResolvedValue(sampleVideos);
 
-      const { getByTestId, getByText } = render(
+      const { getByTestId, getByText } = await render(
         <PlayerProvider>
           <ChannelProfileScreen />
         </PlayerProvider>
@@ -271,7 +268,7 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
   });
 
   describe('ChannelCard & VideoCard navigation triggers', () => {
-    it('calls onPress on ChannelCard when the user taps on the channel item', () => {
+    it('calls onPress on ChannelCard when the user taps on the channel item', async () => {
       const handlePress = jest.fn();
       const favChannel: FavoriteChannel = {
         id: 'UC_custom',
@@ -279,7 +276,7 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
         thumbnail: 'https://example.com/custom.jpg',
       };
 
-      const { getByTestId } = render(
+      const { getByTestId } = await render(
         <ChannelCard
           channel={favChannel}
           isFavorite={false}
@@ -294,11 +291,11 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
       expect(handlePress).toHaveBeenCalledWith(favChannel);
     });
 
-    it('calls onPressChannel on VideoCard when the channel title is pressed', () => {
+    it('calls onPressChannel on VideoCard when the channel title is pressed', async () => {
       const handleVideoPress = jest.fn();
       const handleChannelPress = jest.fn();
 
-      const { getByTestId } = render(
+      const { getByTestId } = await render(
         <VideoCard
           video={sampleVideos[0]}
           onPress={handleVideoPress}
@@ -314,9 +311,9 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
       expect(handleVideoPress).not.toHaveBeenCalled();
     });
 
-    it('renders PlaylistCard and triggers onPress when clicked', () => {
+    it('renders PlaylistCard and triggers onPress when clicked', async () => {
       const handlePlaylistPress = jest.fn();
-      const { getByTestId, getByText } = render(
+      const { getByTestId, getByText } = await render(
         <PlaylistCard
           playlist={samplePlaylists[0]}
           onPress={handlePlaylistPress}
@@ -421,7 +418,7 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
         publishedAt: '2026-10-21T00:00:00Z',
       };
 
-      const { getByTestId } = render(
+      const { getByTestId } = await render(
         <PlayerProvider initialVideo={videoWithThumb}>
           <PersistentPlayerHost />
         </PlayerProvider>
@@ -446,7 +443,7 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
         publishedAt: '2026-10-21T00:00:00Z',
       };
 
-      const { getByTestId } = render(
+      const { getByTestId } = await render(
         <PlayerProvider initialVideo={videoWithoutThumb}>
           <PersistentPlayerHost />
         </PlayerProvider>

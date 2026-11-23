@@ -31,6 +31,22 @@ function VideoCardComponent({
 }: VideoCardProps) {
   const { colors } = useThemeColors();
   const [imageError, setImageError] = useState(false);
+  const isChannelPressedRef = React.useRef(false);
+
+  const handleCardPress = React.useCallback(() => {
+    if (isChannelPressedRef.current) {
+      isChannelPressedRef.current = false;
+      return;
+    }
+    onPress(video);
+  }, [onPress, video]);
+
+  const handleChannelPress = React.useCallback(() => {
+    isChannelPressedRef.current = true;
+    if (onPressChannel && video.channelId) {
+      onPressChannel(video.channelId, video.channelTitle);
+    }
+  }, [onPressChannel, video.channelId, video.channelTitle]);
 
   const hasProgress = Boolean(progress && progress.position > 0);
   const completed = progress
@@ -67,7 +83,7 @@ function VideoCardComponent({
       testID={`video-card-${video.id}`}
       accessibilityRole="button"
       accessibilityLabel={`Reproducir ${video.title} de ${video.channelTitle}`}
-      onPress={() => onPress(video)}
+      onPress={handleCardPress}
       style={({ pressed }) => [
         styles.card,
         compact && styles.cardCompact,
@@ -203,11 +219,7 @@ function VideoCardComponent({
               testID={`video-channel-pressable-${video.id}`}
               accessibilityRole="button"
               accessibilityLabel={`Ver canal ${video.channelTitle}`}
-              onPress={(e) => {
-                // @ts-ignore
-                e?.stopPropagation?.();
-                onPressChannel(video.channelId, video.channelTitle);
-              }}
+              onPress={handleChannelPress}
               hitSlop={6}
             >
               <Text

@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -40,8 +40,24 @@ const HistoryCard = memo(function HistoryCardComponent({
 }: HistoryCardProps) {
   const { colors } = useThemeColors();
   const [imageError, setImageError] = useState(false);
-
   const { video, position, duration, completed, watchedAt } = item;
+  const isChannelPressedRef = useRef(false);
+
+  const handleCardPress = useCallback(() => {
+    if (isChannelPressedRef.current) {
+      isChannelPressedRef.current = false;
+      return;
+    }
+    onPress(item);
+  }, [item, onPress]);
+
+  const handleChannelPress = useCallback(() => {
+    isChannelPressedRef.current = true;
+    if (video.channelId && onPressChannel) {
+      onPressChannel(video.channelId, video.channelTitle);
+    }
+  }, [onPressChannel, video.channelId, video.channelTitle]);
+
   const effectiveDuration = duration || video.durationSeconds || 0;
   const isDone = Boolean(
     completed ||
@@ -78,7 +94,7 @@ const HistoryCard = memo(function HistoryCardComponent({
       testID={`history-card-${video.id}`}
       accessibilityRole="button"
       accessibilityLabel={`Reanudar ${video.title} de ${video.channelTitle}`}
-      onPress={() => onPress(item)}
+      onPress={handleCardPress}
       style={({ pressed }) => [
         styles.card,
         {
@@ -159,11 +175,7 @@ const HistoryCard = memo(function HistoryCardComponent({
             testID={`history-channel-${video.id}`}
             accessibilityRole="button"
             accessibilityLabel={`Ver canal ${video.channelTitle}`}
-            onPress={(e) => {
-              // @ts-ignore
-              e?.stopPropagation?.();
-              onPressChannel(video.channelId, video.channelTitle);
-            }}
+            onPress={handleChannelPress}
             hitSlop={6}
           >
             <Text
@@ -260,8 +272,9 @@ export default function HistoryScreen() {
   const handleOpenChannel = useCallback(
     (channelId: string, channelTitle?: string) => {
       router.push({
-        pathname: `/channel/${channelId}`,
+        pathname: '/channel/[id]',
         params: {
+          id: channelId,
           name: channelTitle || '',
         },
       });

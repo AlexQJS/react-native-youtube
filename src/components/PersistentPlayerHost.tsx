@@ -235,8 +235,9 @@ export function PersistentPlayerHost({
     if (targetChannelId) {
       minimizeVideo();
       router.push({
-        pathname: `/channel/${targetChannelId}`,
+        pathname: '/channel/[id]',
         params: {
+          id: targetChannelId,
           name: channelTitle,
           thumbnail: channelAvatar || undefined,
         },

@@ -83,8 +83,9 @@ export default function SearchScreen() {
   const handleOpenChannel = useCallback(
     (channel: FavoriteChannel) => {
       router.push({
-        pathname: `/channel/${channel.id}`,
+        pathname: '/channel/[id]',
         params: {
+          id: channel.id,
           name: channel.name,
           thumbnail: channel.thumbnail,
           description: channel.description || '',
@@ -97,8 +98,9 @@ export default function SearchScreen() {
   const handleOpenChannelFromVideo = useCallback(
     (channelId: string, channelTitle?: string) => {
       router.push({
-        pathname: `/channel/${channelId}`,
+        pathname: '/channel/[id]',
         params: {
+          id: channelId,
           name: channelTitle || '',
         },
       });
@@ -212,7 +214,7 @@ export default function SearchScreen() {
               <Text style={[styles.sectionHeader, { color: colors.textSecondary, marginTop: 8, marginBottom: 16 }]}>
                 Tus canales favoritos ({favorites.length})
               </Text>
-            ) : null
+            ) : undefined
           }
           ListEmptyComponent={
             <EmptyState
