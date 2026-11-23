@@ -111,7 +111,7 @@ export default function FeedScreen() {
     (channelId: string, channelTitle?: string) => {
       const trimmedId = channelId?.trim();
       if (!trimmedId) return;
-      router.push({
+      router.navigate({
         pathname: '/channel/[id]',
         params: {
           id: trimmedId,

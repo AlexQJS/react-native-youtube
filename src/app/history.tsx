@@ -273,7 +273,7 @@ export default function HistoryScreen() {
     (channelId: string, channelTitle?: string) => {
       const trimmedId = channelId?.trim();
       if (!trimmedId) return;
-      router.push({
+      router.navigate({
         pathname: '/channel/[id]',
         params: {
           id: trimmedId,

@@ -84,7 +84,7 @@ export default function SearchScreen() {
     (channel: FavoriteChannel) => {
       const trimmedId = channel?.id?.trim();
       if (!trimmedId) return;
-      router.push({
+      router.navigate({
         pathname: '/channel/[id]',
         params: {
           id: trimmedId,
@@ -101,7 +101,7 @@ export default function SearchScreen() {
     (channelId: string, channelTitle?: string) => {
       const trimmedId = channelId?.trim();
       if (!trimmedId) return;
-      router.push({
+      router.navigate({
         pathname: '/channel/[id]',
         params: {
           id: trimmedId,

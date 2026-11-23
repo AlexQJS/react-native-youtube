@@ -511,7 +511,7 @@ export default function ChannelProfileScreen() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace('/feed');
+      router.navigate('/feed');
     }
   }, [router]);
 

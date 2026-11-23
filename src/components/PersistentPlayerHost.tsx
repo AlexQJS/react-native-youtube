@@ -235,7 +235,7 @@ export function PersistentPlayerHost({
     const trimmedId = targetChannelId?.trim();
     if (trimmedId) {
       minimizeVideo();
-      router.push({
+      router.navigate({
         pathname: '/channel/[id]',
         params: {
           id: trimmedId,

@@ -261,14 +261,12 @@ function AppShell() {
             <Tabs.Screen
               name="player/[id]"
               options={{
-                href: null,
                 headerShown: false,
               }}
             />
             <Tabs.Screen
-              name="channel"
+              name="channel/[id]"
               options={{
-                href: null,
                 headerShown: false,
               }}
             />
