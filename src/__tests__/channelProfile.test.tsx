@@ -24,8 +24,15 @@ jest.mock('expo-router', () => ({
     push: mockPush,
     back: mockBack,
     navigate: jest.fn(),
+    canGoBack: () => true,
   }),
   useLocalSearchParams: () => ({
+    id: 'UC_test_123',
+    name: 'Canal de Prueba',
+    thumbnail: 'https://example.com/avatar.jpg',
+    description: 'Descripción de prueba del canal',
+  }),
+  useGlobalSearchParams: () => ({
     id: 'UC_test_123',
     name: 'Canal de Prueba',
     thumbnail: 'https://example.com/avatar.jpg',
@@ -264,6 +271,24 @@ describe('Channel Profile Feature (Screen, Hook, Service & Components)', () => {
       await waitFor(() => {
         expect(getByText('Siguiendo')).toBeTruthy();
       });
+    });
+
+    it('calls router.back when the back button is pressed', async () => {
+      jest.spyOn(youtubeService, 'getChannelDetails').mockResolvedValue(sampleChannel);
+      jest.spyOn(youtubeService, 'getChannelVideos').mockResolvedValue(sampleVideos);
+
+      const { getByTestId } = await render(
+        <PlayerProvider>
+          <ChannelProfileScreen />
+        </PlayerProvider>
+      );
+
+      const backBtn = getByTestId('channel-back-button');
+      await act(async () => {
+        fireEvent.press(backBtn);
+      });
+
+      expect(mockBack).toHaveBeenCalled();
     });
   });
 

@@ -82,10 +82,12 @@ export default function SearchScreen() {
 
   const handleOpenChannel = useCallback(
     (channel: FavoriteChannel) => {
+      const trimmedId = channel?.id?.trim();
+      if (!trimmedId) return;
       router.push({
         pathname: '/channel/[id]',
         params: {
-          id: channel.id,
+          id: trimmedId,
           name: channel.name,
           thumbnail: channel.thumbnail,
           description: channel.description || '',
@@ -97,10 +99,12 @@ export default function SearchScreen() {
 
   const handleOpenChannelFromVideo = useCallback(
     (channelId: string, channelTitle?: string) => {
+      const trimmedId = channelId?.trim();
+      if (!trimmedId) return;
       router.push({
         pathname: '/channel/[id]',
         params: {
-          id: channelId,
+          id: trimmedId,
           name: channelTitle || '',
         },
       });

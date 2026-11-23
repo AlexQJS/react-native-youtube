@@ -12,7 +12,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useGlobalSearchParams, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { PlaylistCard } from '../../components/PlaylistCard';
 import { VideoCard } from '../../components/VideoCard';
@@ -41,36 +41,50 @@ export default function ChannelProfileScreen() {
   const { isFavorite, toggleFavorite } = useFavorites();
   const { getProgress } = usePlaybackProgress();
 
-  const params = useLocalSearchParams<{
+  const localParams = useLocalSearchParams<{
     id?: string;
     name?: string;
     thumbnail?: string;
     description?: string;
   }>();
 
+  const globalParams = useGlobalSearchParams<{
+    id?: string;
+    name?: string;
+    thumbnail?: string;
+    description?: string;
+  }>();
+
+  const rawId: unknown = localParams.id || globalParams.id;
   const channelId =
-    typeof params.id === 'string'
-      ? params.id
-      : Array.isArray(params.id)
-      ? params.id[0]
+    typeof rawId === 'string'
+      ? rawId.trim()
+      : Array.isArray(rawId) && typeof rawId[0] === 'string'
+      ? rawId[0].trim()
       : '';
+
+  const rawName: unknown = localParams.name || globalParams.name;
   const paramName =
-    typeof params.name === 'string'
-      ? params.name
-      : Array.isArray(params.name)
-      ? params.name[0]
+    typeof rawName === 'string'
+      ? rawName
+      : Array.isArray(rawName) && typeof rawName[0] === 'string'
+      ? rawName[0]
       : undefined;
+
+  const rawThumbnail: unknown = localParams.thumbnail || globalParams.thumbnail;
   const paramThumbnail =
-    typeof params.thumbnail === 'string'
-      ? params.thumbnail
-      : Array.isArray(params.thumbnail)
-      ? params.thumbnail[0]
+    typeof rawThumbnail === 'string'
+      ? rawThumbnail
+      : Array.isArray(rawThumbnail) && typeof rawThumbnail[0] === 'string'
+      ? rawThumbnail[0]
       : undefined;
+
+  const rawDescription: unknown = localParams.description || globalParams.description;
   const paramDescription =
-    typeof params.description === 'string'
-      ? params.description
-      : Array.isArray(params.description)
-      ? params.description[0]
+    typeof rawDescription === 'string'
+      ? rawDescription
+      : Array.isArray(rawDescription) && typeof rawDescription[0] === 'string'
+      ? rawDescription[0]
       : undefined;
 
   const {
@@ -319,7 +333,7 @@ export default function ChannelProfileScreen() {
           </View>
 
           {/* Description snippet */}
-          {(channel?.description || params.description) ? (
+          {(channel?.description || paramDescription) ? (
             <Pressable
               onPress={() => handleTabChange('about')}
               hitSlop={4}
@@ -329,7 +343,7 @@ export default function ChannelProfileScreen() {
                 numberOfLines={2}
                 style={[styles.descriptionSnippet, { color: colors.textSecondary }]}
               >
-                {channel?.description || params.description}
+                {channel?.description || paramDescription}
               </Text>
               <Text
                 style={[styles.moreInfoLink, { color: colors.primary }]}
@@ -490,8 +504,16 @@ export default function ChannelProfileScreen() {
     handleToggleFavorite,
     initial,
     isChannelFav,
-    params.description,
+    paramDescription,
   ]);
+
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/feed');
+    }
+  }, [router]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -509,7 +531,7 @@ export default function ChannelProfileScreen() {
           testID="channel-back-button"
           accessibilityRole="button"
           accessibilityLabel="Regresar a la pantalla anterior"
-          onPress={() => router.back()}
+          onPress={handleBack}
           hitSlop={8}
           style={styles.iconButton}
         >
@@ -698,7 +720,7 @@ export default function ChannelProfileScreen() {
               style={[styles.aboutDescriptionText, { color: colors.textSecondary }]}
             >
               {channel?.description ||
-                params.description ||
+                paramDescription ||
                 'Este canal no cuenta con una descripción pública.'}
             </Text>
 

@@ -3,6 +3,10 @@ import { render } from '@testing-library/react-native';
 import { VideoCard } from '../components/VideoCard';
 import { VideoItem } from '../types/youtube';
 
+jest.mock('@expo/vector-icons', () => ({
+  Ionicons: 'Ionicons',
+}));
+
 describe('VideoCard duration display', () => {
   const baseVideo: VideoItem = {
     id: 'test_vid_1',
@@ -13,14 +17,14 @@ describe('VideoCard duration display', () => {
     publishedAt: '2026-10-18T10:00:00Z',
   };
 
-  it('muestra la duración en la esquina inferior derecha cuando video.durationFormatted está disponible', () => {
+  it('muestra la duración en la esquina inferior derecha cuando video.durationFormatted está disponible', async () => {
     const videoWithDuration: VideoItem = {
       ...baseVideo,
       durationFormatted: '14:20',
       durationSeconds: 860,
     };
 
-    const { getByTestId, getByText } = render(
+    const { getByTestId, getByText } = await render(
       <VideoCard video={videoWithDuration} onPress={jest.fn()} />
     );
 
@@ -29,13 +33,13 @@ describe('VideoCard duration display', () => {
     expect(getByText('14:20')).toBeTruthy();
   });
 
-  it('formatea y muestra la duración si solo durationSeconds está presente', () => {
+  it('formatea y muestra la duración si solo durationSeconds está presente', async () => {
     const videoWithSecondsOnly: VideoItem = {
       ...baseVideo,
       durationSeconds: 125, // 2:05
     };
 
-    const { getByTestId, getByText } = render(
+    const { getByTestId, getByText } = await render(
       <VideoCard video={videoWithSecondsOnly} onPress={jest.fn()} />
     );
 
@@ -44,8 +48,8 @@ describe('VideoCard duration display', () => {
     expect(getByText('2:05')).toBeTruthy();
   });
 
-  it('muestra la duración obtenida del progreso de reproducción si el vídeo no tiene duración previa', () => {
-    const { getByTestId, getByText } = render(
+  it('muestra la duración obtenida del progreso de reproducción si el vídeo no tiene duración previa', async () => {
+    const { getByTestId, getByText } = await render(
       <VideoCard
         video={baseVideo}
         progress={{
@@ -62,8 +66,8 @@ describe('VideoCard duration display', () => {
     expect(getByText('5:00')).toBeTruthy();
   });
 
-  it('no muestra la etiqueta de duración si no hay duración ni progreso disponible', () => {
-    const { queryByTestId } = render(
+  it('no muestra la etiqueta de duración si no hay duración ni progreso disponible', async () => {
+    const { queryByTestId } = await render(
       <VideoCard video={baseVideo} onPress={jest.fn()} />
     );
 

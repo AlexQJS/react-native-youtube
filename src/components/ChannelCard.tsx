@@ -30,10 +30,17 @@ function ChannelCardComponent({
     onPress?.(channel);
   }, [channel, onPress]);
 
-  const handleToggleFavorite = React.useCallback(() => {
-    isFavoritePressedRef.current = true;
-    onToggleFavorite(channel);
-  }, [channel, onToggleFavorite]);
+  const handleToggleFavorite = React.useCallback(
+    (e?: any) => {
+      e?.stopPropagation?.();
+      isFavoritePressedRef.current = true;
+      setTimeout(() => {
+        isFavoritePressedRef.current = false;
+      }, 400);
+      onToggleFavorite(channel);
+    },
+    [channel, onToggleFavorite]
+  );
 
   const initial = channel.name ? channel.name.charAt(0).toUpperCase() : '?';
   const showImage = Boolean(channel.thumbnail && !imageError);

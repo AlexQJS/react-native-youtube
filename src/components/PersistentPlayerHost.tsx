@@ -232,12 +232,13 @@ export function PersistentPlayerHost({
         // Ignorar fallo de búsqueda
       }
     }
-    if (targetChannelId) {
+    const trimmedId = targetChannelId?.trim();
+    if (trimmedId) {
       minimizeVideo();
       router.push({
         pathname: '/channel/[id]',
         params: {
-          id: targetChannelId,
+          id: trimmedId,
           name: channelTitle,
           thumbnail: channelAvatar || undefined,
         },

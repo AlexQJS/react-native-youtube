@@ -41,12 +41,19 @@ function VideoCardComponent({
     onPress(video);
   }, [onPress, video]);
 
-  const handleChannelPress = React.useCallback(() => {
-    isChannelPressedRef.current = true;
-    if (onPressChannel && video.channelId) {
-      onPressChannel(video.channelId, video.channelTitle);
-    }
-  }, [onPressChannel, video.channelId, video.channelTitle]);
+  const handleChannelPress = React.useCallback(
+    (e?: any) => {
+      e?.stopPropagation?.();
+      isChannelPressedRef.current = true;
+      setTimeout(() => {
+        isChannelPressedRef.current = false;
+      }, 400);
+      if (onPressChannel && video.channelId) {
+        onPressChannel(video.channelId, video.channelTitle);
+      }
+    },
+    [onPressChannel, video.channelId, video.channelTitle]
+  );
 
   const hasProgress = Boolean(progress && progress.position > 0);
   const completed = progress
